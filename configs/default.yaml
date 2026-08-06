@@ -1,0 +1,50 @@
+# Default Configuration for Mamba-DSAC
+
+# Model Architecture
+model:
+  mamba:
+    d_model: 128
+    n_layers: 4
+    d_state: 16
+    expand: 2
+    dropout: 0.1
+  
+  dsac:
+    learning_rate: 3.0e-4
+    buffer_size: 1000000
+    batch_size: 256
+    tau: 0.005
+    gamma: 0.99
+    n_critics: 2
+    top_quantiles_to_drop: 2  # TQC specific
+
+  llm:
+    model_name: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    max_tokens: 512
+
+# Training
+training:
+  total_timesteps: 1000000
+  eval_freq: 10000
+  n_eval_episodes: 10
+  seeds: [42, 1, 100, 7, 2024]  # For robustness testing
+
+# Data
+data:
+  lob_sequence_length: 100
+  prediction_horizons: [10, 20, 50, 100]  # k-step ahead
+  train_split: 0.7
+  val_split: 0.15
+  test_split: 0.15
+
+# Environment
+environment:
+  simulator: "abides"
+  market_impact: true
+  latency_ms: 1
+
+# Experiment
+experiment:
+  name: "mamba_dsac_baseline"
+  log_dir: "experiments/logs"
+  save_dir: "experiments/checkpoints"
