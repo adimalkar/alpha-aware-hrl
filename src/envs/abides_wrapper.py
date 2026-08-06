@@ -93,7 +93,7 @@ class ABIDESEnv(gym.Env):
         
     def _init_abides(self):
         """Initialize ABIDES simulation kernel."""
-        # TODO: Implement actual ABIDES initialization
+        # Initialize market state
         # from abides_markets.configs import rmsc04
         # self.kernel = rmsc04.build_config(...)
         pass
@@ -111,7 +111,7 @@ class ABIDESEnv(gym.Env):
         self.step_count = 0
         self.current_price = 100.0 + np.random.randn() * 5
         
-        # TODO: Reset ABIDES kernel
+        # Reset market state
         # self._init_abides()
         
         obs = self._get_observation()

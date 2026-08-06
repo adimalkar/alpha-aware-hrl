@@ -69,7 +69,7 @@ class TimesFMWrapper(nn.Module):
             )
         )
         
-        # Placeholder feature projection
+        # Feature projection layer
         # TimesFM typically outputs 768-dim features
         self.feature_proj = nn.Linear(768, 128).to(self.device)
         

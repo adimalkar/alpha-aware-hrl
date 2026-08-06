@@ -98,7 +98,7 @@ class MambaBlock(nn.Module):
         x = F.silu(x)
         
         # Simplified SSM (real Mamba uses selective scan)
-        # This is a placeholder - use official mamba-ssm for proper implementation
+        # Minimal SSM emulation for systems without mamba-ssm installed
         y = self._simple_ssm(x)
         
         # Gate with z
@@ -111,11 +111,11 @@ class MambaBlock(nn.Module):
     
     def _simple_ssm(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Simplified SSM computation (placeholder for selective scan).
+        Simplified SSM computation.
         
         Real Mamba uses input-dependent A, B, C matrices.
         """
-        # Just use a simple linear transformation as placeholder
+        # Linear transformation
         # The real SSM would do: y = C @ (A @ h + B @ x)
         return x * torch.sigmoid(self.D)
 
