@@ -96,7 +96,12 @@ class HistoricalLOBEnv(gym.Env):
         super().reset(seed=seed)
         
         # Pick a random starting index that allows for a full episode
-        self.start_idx = np.random.randint(0, self.n_samples - self.episode_length)
+        max_start = self.n_samples - self.episode_length
+        if max_start <= 0:
+            self.start_idx = 0
+            self.episode_length = max(1, self.n_samples - 1)
+        else:
+            self.start_idx = np.random.randint(0, max_start)
         self.current_step = 0
         
         self.cash = self.starting_cash

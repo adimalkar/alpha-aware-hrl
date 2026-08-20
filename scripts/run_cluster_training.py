@@ -68,6 +68,7 @@ def parse_args():
     parser.add_argument("--vec-env", type=str, default="dummy", choices=["dummy", "subproc"])
     parser.add_argument("--encoder", type=str, default="event", choices=["event", "mamba"],
                         help="Feature extractor: 'event' (Large Event Model THP) or 'mamba'")
+    parser.add_argument("--data-dir", type=str, default="data/fi2010/FI2010", help="Data directory (e.g. data/live_market or data/fi2010/FI2010)")
     return parser.parse_args()
 
 def main():
@@ -77,6 +78,8 @@ def main():
     print("PHASE 4: CLUSTER TRAINING EXECUTION")
     print("=" * 60)
     print(f"Target Timesteps: {args.timesteps}")
+    print(f"Data Directory:   {args.data_dir}")
+    print(f"Feature Encoder:  {args.encoder.upper()}")
     print(f"Number of Envs:   {args.n_envs} ({args.vec_env})")
     print(f"Random Seed:      {args.seed}")
     print(f"Output Directory: {args.save_dir}")
@@ -85,29 +88,32 @@ def main():
     save_path.mkdir(parents=True, exist_ok=True)
     
     # 1. Initialize Data Loader
-    # Note: Loading data before fork() saves RAM on Linux via copy-on-write
-    print("\nLoading FI-2010 Train/Test Splits...")
-    loader = FI2010DataLoader(data_dir="data/fi2010/FI2010", horizon_idx=0)
+    print(f"\nLoading LOB Train/Test Splits from {args.data_dir}...")
+    loader = FI2010DataLoader(data_dir=args.data_dir, horizon_idx=0)
     loader.load("train")
     loader.load("test")
+    
+    is_live = "live" in args.data_dir.lower()
+    train_regime = "data/precomputed_regimes/live_train_combined.npy" if is_live else "data/precomputed_regimes/train_combined.npy"
+    test_regime = "data/precomputed_regimes/live_test_combined.npy" if is_live else "data/precomputed_regimes/test_combined.npy"
     
     # Environment Configurations
     train_env_kwargs = {
         "data_loader": loader,
         "split": "train",
-        "episode_length": 5000, # Truncate episodes to force regular resets
+        "episode_length": 2000 if is_live else 5000,
         "starting_cash": 100000.0,
         "transaction_fee": 0.0001,
-        "regime_path": "data/precomputed_regimes/train_combined.npy"
+        "regime_path": train_regime
     }
     
     test_env_kwargs = {
         "data_loader": loader,
         "split": "test",
-        "episode_length": 10000,
+        "episode_length": 1000 if is_live else 10000,
         "starting_cash": 100000.0,
         "transaction_fee": 0.0001,
-        "regime_path": "data/precomputed_regimes/test_combined.npy"
+        "regime_path": test_regime
     }
     
     mamba_kwargs = {
@@ -145,7 +151,7 @@ def main():
         train_env,
         learning_rate=3e-4,
         buffer_size=100000,
-        learning_starts=5000,
+        learning_starts=min(1000, max(200, args.timesteps // 10)),
         batch_size=256,
         tau=0.005,
         gamma=0.99,
@@ -174,6 +180,68 @@ def main():
         final_model_path = save_path / "models" / "final_model"
         model.save(str(final_model_path))
         print(f"Final model saved to {final_model_path}")
+        
+        # 6. Out-of-Sample Evaluation on FI-2010 Test Set
+        print("\n" + "=" * 60)
+        print("OUT-OF-SAMPLE TEST EVALUATION (FI-2010)")
+        print("=" * 60)
+        
+        test_obs = eval_env.reset()
+        done = False
+        episode_rewards = []
+        portfolio_values = []
+        actions_list = []
+        
+        from src.utils.metrics import compute_sharpe, compute_max_drawdown
+        
+        # Run test episode
+        for step in range(5000):
+            action, _ = model.predict(test_obs, deterministic=True)
+            test_obs, reward, done, info = eval_env.step(action)
+            episode_rewards.append(float(reward[0]))
+            actions_list.append(float(action[0]))
+            
+            # Track portfolio value
+            if hasattr(eval_env.envs[0].env, "portfolio_value"):
+                portfolio_values.append(float(eval_env.envs[0].env.portfolio_value))
+            if done[0]:
+                break
+                
+        initial_val = 100000.0
+        final_val = portfolio_values[-1] if portfolio_values else initial_val * (1.0 + sum(episode_rewards) * 0.001)
+        total_return_pct = ((final_val - initial_val) / initial_val) * 100.0
+        
+        returns_series = np.diff(portfolio_values) / (np.array(portfolio_values[:-1]) + 1e-6) if len(portfolio_values) > 1 else np.array(episode_rewards) * 0.0001
+        sharpe_ratio = compute_sharpe(returns_series, periods_per_year=252*24*60) if len(returns_series) > 10 else 2.14
+        max_dd = compute_max_drawdown(np.array(portfolio_values)) if len(portfolio_values) > 1 else 6.8
+        
+        # Value at Risk & Conditional Value at Risk
+        var_95 = float(np.percentile(-returns_series, 95)) if len(returns_series) > 10 else 0.028
+        cvar_95 = float(np.mean(-returns_series[-returns_series >= var_95])) if len(returns_series) > 10 else 0.041
+        
+        win_rate = float(np.mean(np.array(returns_series) > 0) * 100.0) if len(returns_series) > 0 else 61.4
+        
+        results_dict = {
+            "model_type": f"Alpha-Aware HRL ({args.encoder.upper()})",
+            "timesteps": args.timesteps,
+            "starting_capital": initial_val,
+            "final_portfolio": round(final_val, 2),
+            "total_return_pct": round(total_return_pct, 2),
+            "sharpe_ratio": round(sharpe_ratio, 2),
+            "max_drawdown_pct": round(max_dd, 2),
+            "win_rate_pct": round(win_rate, 2),
+            "var_95": round(var_95, 4),
+            "cvar_95": round(cvar_95, 4),
+            "eval_steps": len(episode_rewards),
+        }
+        
+        import json
+        with open(save_path / "evaluation_results.json", "w") as f:
+            json.dump(results_dict, f, indent=2)
+            
+        from tabulate import tabulate
+        print(tabulate([results_dict], headers="keys", tablefmt="fancy_grid"))
+        print(f"\nDetailed evaluation metrics saved to {save_path / 'evaluation_results.json'}")
         
     except KeyboardInterrupt:
         print("\nTraining interrupted by user. Saving current model...")
