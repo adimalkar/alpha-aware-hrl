@@ -10,6 +10,8 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  Zap,
+  Flame,
 } from 'lucide-react';
 
 const navItems = [
@@ -17,6 +19,9 @@ const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/portfolio', label: 'Portfolio', icon: TrendingUp },
   { path: '/training', label: 'Training', icon: Activity },
+  { section: 'Event Model (LEM)' },
+  { path: '/events', label: 'Event Stream', icon: Zap },
+  { path: '/intensity', label: 'Hawkes Intensity', icon: Flame },
   { section: 'Intelligence' },
   { path: '/regimes', label: 'LLM Regimes', icon: Brain },
   { path: '/lob', label: 'LOB Heatmap', icon: Layers },

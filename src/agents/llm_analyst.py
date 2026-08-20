@@ -7,7 +7,7 @@ that guides the low-level trading agent.
 
 import re
 import torch
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass
 
 
@@ -209,3 +209,54 @@ REASONING: [Brief explanation]
         
         # Add confidence as additional feature
         return torch.cat([regime_onehot, torch.tensor([regime_signal.confidence])])
+
+
+class EventAwareRegimeAnalyst:
+    """
+    Temporal Point Process (TPP) + LLM Regime Analyst.
+    
+    Processes news as continuous-time event streams, computing Hawkes arrival
+    intensities and tempo-dependent crash probabilities.
+    """
+    def __init__(
+        self,
+        embed_dim: int = 128,
+        device: str = "cuda" if torch.cuda.is_available() else "cpu",
+    ):
+        self.device = device
+        from src.models.tpp_regime import TPPLoRARegimeDetector, NewsEvent
+        self.NewsEvent = NewsEvent
+        self.detector = TPPLoRARegimeDetector(embed_dim=embed_dim).to(device)
+        self.detector.eval()
+
+    def analyze_events(
+        self,
+        news_events: List[Any],
+        current_time: Optional[float] = None,
+    ) -> Tuple[RegimeSignal, Dict[str, float]]:
+        """
+        Analyzes a sequence of NewsEvent items.
+        
+        Returns:
+            RegimeSignal, and dictionary of Hawkes intensity rates {lambda_safe, lambda_risky, lambda_crash}
+        """
+        with torch.no_grad():
+            regime, conf, emb, intensities = self.detector(news_events, current_time)
+            
+        reasoning = (
+            f"TPP Hawkes: λ_crash={intensities['lambda_crash']:.3f}, "
+            f"λ_risky={intensities['lambda_risky']:.3f}, λ_safe={intensities['lambda_safe']:.3f}"
+        )
+        signal = RegimeSignal(
+            regime=regime,
+            confidence=conf,
+            reasoning=reasoning,
+        )
+        return signal, intensities
+
+    def get_regime_embedding(self, regime_signal: RegimeSignal) -> torch.Tensor:
+        """Convert regime signal to 4-D embedding tensor."""
+        regime_onehot = torch.zeros(3)
+        regime_onehot[regime_signal.regime] = 1.0
+        return torch.cat([regime_onehot, torch.tensor([regime_signal.confidence])])
+

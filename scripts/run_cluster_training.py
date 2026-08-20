@@ -28,8 +28,9 @@ from src.envs.historical_lob_env import HistoricalLOBEnv
 from src.envs.hierarchical_wrapper import HierarchicalEnvWrapper
 from src.agents.mamba_extractor import MambaFeatureExtractor
 from src.agents.llm_analyst import LLMAnalyst
+from src.models.event_encoder import EventFeatureExtractor
 
-def make_env(env_kwargs, mamba_kwargs, rank, seed=0):
+def make_env(env_kwargs, extractor_kwargs, encoder_type, rank, seed=0):
     """
     Utility function for multiplexed multiprocessing.
     Creates a callable that instantiates the wrapped environment.
@@ -39,18 +40,21 @@ def make_env(env_kwargs, mamba_kwargs, rank, seed=0):
         env = HistoricalLOBEnv(**env_kwargs)
         env.reset(seed=seed + rank)
         
-        # 2. Extractors
-        # We instantiate Mamba and LLM inside the process to avoid IPC tensor issues
-        mamba = MambaFeatureExtractor(**mamba_kwargs)
-        llm = LLMAnalyst(device="cpu") # Not actually used for inference due to precomputation
+        # 2. Feature Extractor
+        if encoder_type == "event":
+            extractor = EventFeatureExtractor(input_dim=144, d_model=extractor_kwargs.get("d_model", 128))
+        else:
+            extractor = MambaFeatureExtractor(**extractor_kwargs)
+            
+        llm = LLMAnalyst(device="cpu") # Handled via precomputed regime
         
         # 3. Wrapper
         wrapped_env = HierarchicalEnvWrapper(
             env=env,
-            mamba_extractor=mamba,
+            mamba_extractor=extractor,
             llm_analyst=llm,
-            alpha_model=None, # SimpleAlphaModel could go here
-            device="cuda" # Ensure Mamba extracts on GPU
+            alpha_model=None,
+            device="cuda"
         )
         return wrapped_env
     return _init
@@ -62,6 +66,8 @@ def parse_args():
     parser.add_argument("--n-envs", type=int, default=4, help="Number of vectorized environments")
     parser.add_argument("--save-dir", type=str, default="experiments/cluster_run", help="Output directory")
     parser.add_argument("--vec-env", type=str, default="dummy", choices=["dummy", "subproc"])
+    parser.add_argument("--encoder", type=str, default="event", choices=["event", "mamba"],
+                        help="Feature extractor: 'event' (Large Event Model THP) or 'mamba'")
     return parser.parse_args()
 
 def main():
@@ -112,15 +118,15 @@ def main():
     }
     
     # 2. Create Vectorized Environments
-    print("\nCreating Vectorized Environments...")
-    env_fns = [make_env(train_env_kwargs, mamba_kwargs, i, args.seed) for i in range(args.n_envs)]
+    print(f"\nCreating Vectorized Environments with [{args.encoder.upper()}] Encoder...")
+    env_fns = [make_env(train_env_kwargs, mamba_kwargs, args.encoder, i, args.seed) for i in range(args.n_envs)]
     
     if args.vec_env == "subproc":
         train_env = SubprocVecEnv(env_fns)
     else:
         train_env = DummyVecEnv(env_fns)
         
-    eval_env = DummyVecEnv([make_env(test_env_kwargs, mamba_kwargs, 0, args.seed + 999)])
+    eval_env = DummyVecEnv([make_env(test_env_kwargs, mamba_kwargs, args.encoder, 0, args.seed + 999)])
     
     # 3. Setup Callbacks
     eval_callback = EvalCallback(

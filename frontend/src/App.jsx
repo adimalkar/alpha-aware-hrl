@@ -8,6 +8,8 @@ import RegimesPage from './pages/RegimesPage';
 import LOBPage from './pages/LOBPage';
 import BaselinesPage from './pages/BaselinesPage';
 import ConfigPage from './pages/ConfigPage';
+import EventStreamPage from './pages/EventStreamPage';
+import IntensityPage from './pages/IntensityPage';
 
 export default function App() {
   const [collapsed, setCollapsed] = useState(false);
@@ -20,6 +22,8 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/portfolio" element={<PortfolioPage />} />
           <Route path="/training" element={<TrainingPage />} />
+          <Route path="/events" element={<EventStreamPage />} />
+          <Route path="/intensity" element={<IntensityPage />} />
           <Route path="/regimes" element={<RegimesPage />} />
           <Route path="/lob" element={<LOBPage />} />
           <Route path="/baselines" element={<BaselinesPage />} />

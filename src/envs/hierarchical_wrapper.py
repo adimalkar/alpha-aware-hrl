@@ -144,10 +144,14 @@ class HierarchicalEnvWrapper(gym.ObservationWrapper):
         lob_sequence = np.array(self.state_buffer, dtype=np.float32)
         lob_tensor = torch.tensor(lob_sequence).unsqueeze(0).to(self.device)
         
-        # 3. Extract features using Mamba
+        # 3. Extract features using Mamba or Event Feature Extractor
         with torch.no_grad():
             self.mamba_extractor.eval()
-            features, final_state = self.mamba_extractor(lob_tensor)
+            extractor_out = self.mamba_extractor(lob_tensor)
+            if isinstance(extractor_out, tuple):
+                _, final_state = extractor_out
+            else:
+                final_state = extractor_out
             mamba_feats = final_state.cpu().numpy().squeeze()
             
         # 4. Get current macro regime embedding

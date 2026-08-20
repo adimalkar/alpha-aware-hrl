@@ -13,17 +13,25 @@ representing a few hours of market time) and expand the array.
 """
 
 import sys
+import argparse
 import numpy as np
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 
 sys.path.insert(0, '.')
-from src.agents.llm_analyst import LLMAnalyst
+from src.agents.llm_analyst import LLMAnalyst, EventAwareRegimeAnalyst
+from src.models.tpp_regime import NewsEvent
 
 def main():
+    parser = argparse.ArgumentParser(description="Precompute Macro Regimes from News")
+    parser.add_argument("--mode", choices=["event", "classic"], default="event",
+                        help="Regime detector mode: 'event' (TPP-LLM Hawkes) or 'classic' (TinyLlama)")
+    parser.add_argument("--chunk-size", type=int, default=10000, help="Ticks per regime chunk")
+    args = parser.parse_args()
+
     print("=" * 60)
-    print("PHASE 2: Precomputing LLM Regimes from FNSPID")
+    print(f"PHASE 2/3: Precomputing Macro Regimes from FNSPID [Mode: {args.mode.upper()}]")
     print("=" * 60)
     
     # 1. Load Data
@@ -43,12 +51,15 @@ def main():
     print(f"Loaded FI-2010 Test:  {n_test} ticks")
     print(f"Loaded FNSPID News:   {len(news_df)} articles")
     
-    # 2. Initialize LLM Analyst
-    print("\nInitializing LLM Analyst (TinyLlama-1.1B-Chat)...")
-    analyst = LLMAnalyst(device="cuda")
-    
-    # We will compute 1 regime per chunk of ticks
-    chunk_size = 10000 
+    # 2. Initialize Analyst
+    chunk_size = args.chunk_size
+
+    if args.mode == "event":
+        print("\nInitializing TPP-LLM Event Regime Analyst (Hawkes Intensity)...")
+        analyst = EventAwareRegimeAnalyst()
+    else:
+        print("\nInitializing Classic LLM Analyst (TinyLlama-1.1B-Chat)...")
+        analyst = LLMAnalyst(device="cuda")
     
     def compute_regimes_for_split(n_ticks, split_name, start_news_idx=0):
         n_chunks = int(np.ceil(n_ticks / chunk_size))
@@ -59,12 +70,22 @@ def main():
         news_idx = start_news_idx
         
         for i in tqdm(range(n_chunks)):
-            # Grab 5 news articles to form the prompt context
+            # Grab 5 news articles to form the context window
             news_subset = news_df.iloc[news_idx:news_idx+5]['Article_title'].tolist()
-            prompt_context = " ".join([str(x) for x in news_subset])
             
-            # Predict regime
-            signal = analyst.analyze(news_subset)
+            if args.mode == "event":
+                # Construct NewsEvent objects with inter-arrival timestamps
+                events = [
+                    NewsEvent(
+                        timestamp=float(i * 1.0 + j * 0.15),
+                        headline=str(title),
+                        sentiment_score=0.0,
+                    )
+                    for j, title in enumerate(news_subset)
+                ]
+                signal, _ = analyst.analyze_events(events, current_time=float(i * 1.0 + 1.0))
+            else:
+                signal = analyst.analyze(news_subset)
             
             # Broadcast to the tick array
             start_tick = i * chunk_size
