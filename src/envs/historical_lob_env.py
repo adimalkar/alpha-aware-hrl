@@ -99,16 +99,19 @@ class HistoricalLOBEnv(gym.Env):
             raise ValueError(f"reward must be 'log_return' or 'simple_return', got {reward!r}")
         self.reward_kind = reward
 
-        if split == "train":
-            if self.data_loader.train_data is None:
-                self.data_loader.load("train")
-            self.data = self.data_loader.train_data
-            self.labels = self.data_loader.train_labels
-        else:
-            if self.data_loader.test_data is None:
-                self.data_loader.load("test")
-            self.data = self.data_loader.test_data
-            self.labels = self.data_loader.test_labels
+        # Resolve the split generically so three-way train/val/test works.
+        # The previous code branched on `split == "train"` and sent everything
+        # else to the test attributes, which silently handed 'val' the test data.
+        data_attr, label_attr = f"{split}_data", f"{split}_labels"
+        if not hasattr(self.data_loader, data_attr):
+            raise ValueError(
+                f"Data loader {type(self.data_loader).__name__} has no '{data_attr}'; "
+                f"split {split!r} is not supported by it."
+            )
+        if getattr(self.data_loader, data_attr) is None:
+            self.data_loader.load(split)
+        self.data = getattr(self.data_loader, data_attr)
+        self.labels = getattr(self.data_loader, label_attr)
 
         self.n_samples = len(self.data)
         self.n_features = int(self.data.shape[1])

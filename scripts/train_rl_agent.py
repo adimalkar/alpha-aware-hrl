@@ -107,6 +107,19 @@ def run_eval_episode(model, env, max_steps):
     return np.asarray(equity), np.asarray(positions), rewards
 
 
+def buy_and_hold(prices, fee):
+    """
+    Fully-invested buy-and-hold equity curve on the same price path.
+
+    M5: the project had no market benchmark anywhere. A trading return quoted
+    without one says nothing -- a strategy that returns +5% while the asset
+    returned +20% has destroyed value.
+    """
+    prices = np.asarray(prices, dtype=np.float64)
+    equity = 100000.0 * (prices / prices[0]) * (1.0 - fee)
+    return equity
+
+
 def main():
     ap = argparse.ArgumentParser(description="Train the RL trading agent")
     ap.add_argument("--data-dir", default="data/live_market")
@@ -139,11 +152,14 @@ def main():
     print("=" * 68)
 
     loader = LiveMarketDataLoader(args.data_dir, args.symbol)
-    loader.load("train")
-    loader.load("test")
-    print(f"  train rows {len(loader.train_data):>6}   test rows {len(loader.test_data):>6}")
-    print(f"  train mid  {loader.train_mid.min():.2f}-{loader.train_mid.max():.2f}")
-    print(f"  test  mid  {loader.test_mid.min():.2f}-{loader.test_mid.max():.2f}")
+    for sp in ("train", "val", "test"):
+        loader.load(sp)
+    print(f"  train {len(loader.train_data):>6} rows  "
+          f"mid {loader.train_mid.min():.2f}-{loader.train_mid.max():.2f}")
+    print(f"  val   {len(loader.val_data):>6} rows  "
+          f"mid {loader.val_mid.min():.2f}-{loader.val_mid.max():.2f}   (model selection)")
+    print(f"  test  {len(loader.test_data):>6} rows  "
+          f"mid {loader.test_mid.min():.2f}-{loader.test_mid.max():.2f}   (sealed, used once)")
 
     # Train and eval draw from disjoint, temporally ordered splits with a purge
     # gap applied at collection time. The previous ablation script built ONE env
@@ -151,9 +167,15 @@ def main():
     train_env = DummyVecEnv([
         make_env(loader, "train", args.seq_len, args.episode_length, args.fee, args.seed)
     ])
-    eval_env = DummyVecEnv([
-        make_env(loader, "test", args.seq_len, args.eval_episode_length, args.fee,
+    # Model selection runs on 'val'. 'test' is the sealed holdout and is
+    # touched exactly once, after training is finished (audit X3).
+    val_env = DummyVecEnv([
+        make_env(loader, "val", args.seq_len, args.eval_episode_length, args.fee,
                  args.seed + 10_000)
+    ])
+    test_env = DummyVecEnv([
+        make_env(loader, "test", args.seq_len, args.eval_episode_length, args.fee,
+                 args.seed + 20_000)
     ])
 
     extractor_kwargs = {}
@@ -188,7 +210,7 @@ def main():
         print(f"  encoder frozen    : {getattr(fe, 'frozen', False)}")
 
     eval_cb = EvalCallback(
-        eval_env,
+        val_env,
         best_model_save_path=str(save_path / "models"),
         log_path=str(save_path / "logs"),
         eval_freq=max(args.timesteps // 10, 500),
@@ -210,8 +232,8 @@ def main():
             if p.requires_grad
         )
 
-    print("\n  out-of-sample evaluation on the held-out split...")
-    equity, positions, rewards = run_eval_episode(model, eval_env, args.eval_steps)
+    print("\n  final evaluation on the SEALED test split (used once)...")
+    equity, positions, rewards = run_eval_episode(model, test_env, args.eval_steps)
     if len(equity) < 2:
         raise RuntimeError(
             f"Evaluation collected {len(equity)} portfolio points over "
@@ -226,6 +248,13 @@ def main():
     )
 
     n_changes = int(np.sum(np.abs(np.diff(positions)) > 1e-9))
+
+    # Buy-and-hold on the identical price window the agent just traded.
+    test_prices = loader.prices("test")[: len(equity)]
+    bh_equity = buy_and_hold(test_prices, args.fee)
+    bh = compute_all_metrics(bh_equity, np.ones_like(bh_equity),
+                             float(bh_equity[0]), periods_per_year=None)
+
     results = {
         "symbol": args.symbol,
         "encoder": args.encoder,
@@ -248,6 +277,15 @@ def main():
         "n_return_periods": metrics["n_periods"],
         "mean_abs_position_weight": round(float(np.mean(np.abs(positions))), 6),
         "n_position_changes": n_changes,
+        "benchmark_buy_and_hold": {
+            "total_return_pct": round(bh["total_return_pct"], 4),
+            "sharpe_per_step": round(bh["sharpe_ratio"], 4),
+            "max_drawdown_pct": round(bh["max_drawdown_pct"], 4),
+        },
+        "excess_return_vs_buy_and_hold_pct": round(
+            metrics["total_return_pct"] - bh["total_return_pct"], 4
+        ),
+        "beats_buy_and_hold": bool(metrics["total_return_pct"] > bh["total_return_pct"]),
     }
     if n_changes == 0:
         results["WARNING"] = (

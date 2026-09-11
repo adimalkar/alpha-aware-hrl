@@ -231,15 +231,39 @@ class LiveMarketDataLoader:
     _MID_COL = 41
     _SPREAD_COL = 40
 
-    def __init__(self, data_dir: str = "data/live_market", symbol: str = "BTC/USD"):
+    def __init__(
+        self,
+        data_dir: str = "data/live_market",
+        symbol: str = "BTC/USD",
+        val_frac: float = 0.2,
+        purge: int = 50,
+    ):
+        """
+        Args:
+            val_frac: fraction carved off the END of the training series to form
+                a validation split. Model selection and any repeated evaluation
+                must use 'val'; 'test' is the sealed holdout.
+            purge: rows dropped between train and val so a label horizon cannot
+                span the boundary.
+
+        X3: the audit found no sealed holdout anywhere in the project -- the
+        FI-2010 test set had been scored by every baseline, every ablation arm
+        and every robustness seed, leaving multiple-comparison inflation
+        unbounded. Splitting val off train keeps 'test' single-use.
+        """
         self.data_dir = Path(data_dir)
         self.symbol = symbol
         self.safe = symbol.replace("/", "").lower()
         self.sym_dir = self.data_dir / self.safe
+        self.val_frac = float(val_frac)
+        self.purge = int(purge)
 
         self.train_data = None
         self.train_labels = None
         self.train_mid = None
+        self.val_data = None
+        self.val_labels = None
+        self.val_mid = None
         self.test_data = None
         self.test_labels = None
         self.test_mid = None
@@ -248,18 +272,36 @@ class LiveMarketDataLoader:
         self._scaler_std = None
 
     def _raw(self, split: str):
-        path = self.sym_dir / f"{split}.npz"
+        # 'val' is carved from the tail of the training series; only 'train' and
+        # 'test' exist on disk.
+        source = "train" if split in ("train", "val") else split
+        path = self.sym_dir / f"{source}.npz"
         if not path.exists():
             raise FileNotFoundError(
                 f"No {split} data at {path}. Run:\n"
                 f"  python scripts/fetch_live_market_data.py --symbols {self.symbol}"
             )
         with np.load(path) as z:
-            return (
-                z["features"].astype(np.float64),
-                z["mid"].astype(np.float64),
-                z["label"].astype(np.int64),
-            )
+            feats = z["features"].astype(np.float64)
+            mid = z["mid"].astype(np.float64)
+            labels = z["label"].astype(np.int64)
+
+        if split in ("train", "val") and self.val_frac > 0:
+            n = len(feats)
+            cut = int(n * (1.0 - self.val_frac))
+            if split == "train":
+                end = cut - self.purge
+                if end <= 0:
+                    raise ValueError(
+                        f"val_frac={self.val_frac} and purge={self.purge} leave no "
+                        f"training rows out of {n}. Collect more data."
+                    )
+                sl = slice(0, end)
+            else:
+                sl = slice(cut, n)
+            feats, mid, labels = feats[sl], mid[sl], labels[sl]
+
+        return feats, mid, labels
 
     def _to_stationary(self, feats: np.ndarray, mid: np.ndarray) -> np.ndarray:
         """Convert absolute price levels to mid-relative fractions."""
@@ -279,7 +321,7 @@ class LiveMarketDataLoader:
         Load and scale one split. 'train' must be loaded before 'test' so the
         scaler exists; calling load('test') first does that automatically.
         """
-        if split == "test" and self._scaler_mean is None:
+        if split in ("val", "test") and self._scaler_mean is None:
             self.load("train")
 
         feats, mid, labels = self._raw(split)
@@ -295,6 +337,8 @@ class LiveMarketDataLoader:
 
         if split == "train":
             self.train_data, self.train_mid, self.train_labels = scaled, mid, labels
+        elif split == "val":
+            self.val_data, self.val_mid, self.val_labels = scaled, mid, labels
         else:
             self.test_data, self.test_mid, self.test_labels = scaled, mid, labels
 
@@ -302,10 +346,7 @@ class LiveMarketDataLoader:
 
     def prices(self, split: str = "train") -> np.ndarray:
         """The causal mid-price series for `split`, in real units."""
-        if split == "train":
-            if self.train_mid is None:
-                self.load("train")
-            return self.train_mid
-        if self.test_mid is None:
-            self.load("test")
-        return self.test_mid
+        attr = {"train": "train_mid", "val": "val_mid", "test": "test_mid"}[split]
+        if getattr(self, attr) is None:
+            self.load(split)
+        return getattr(self, attr)
