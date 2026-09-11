@@ -184,3 +184,109 @@ class FI2010Dataset(Dataset):
 
 
 
+
+
+class LiveMarketDataLoader:
+    """
+    Loader for the per-symbol .npz series written by scripts/fetch_live_market_data.py.
+
+    Exposes the same attribute surface as FI2010DataLoader so it can be dropped
+    into HistoricalLOBEnv, plus the real mid-price series the env needs.
+
+    Feature scaling is fit on the TRAINING SPLIT ONLY and then applied to both
+    splits. Fitting on the concatenation -- or normalising each split by its own
+    statistics -- leaks test distribution information into training and is the
+    quiet version of the same mistake that made the old live test set a copy of
+    the train set.
+
+    The mid-price series is deliberately NOT scaled: it is the causal price path
+    the environment trades on, and rescaling it (the old pipeline forced every
+    mid to exactly 100.0) is what destroyed the only genuine price information
+    in the previous dataset.
+    """
+
+    # Columns holding absolute prices: 10 levels x (ask_price, bid_price), plus
+    # spread and mid. These are non-stationary in level, so they are converted
+    # to fractions of the mid before scaling.
+    _PRICE_COLS = [i * 4 + 0 for i in range(10)] + [i * 4 + 2 for i in range(10)]
+    _MID_COL = 41
+    _SPREAD_COL = 40
+
+    def __init__(self, data_dir: str = "data/live_market", symbol: str = "BTC/USD"):
+        self.data_dir = Path(data_dir)
+        self.symbol = symbol
+        self.safe = symbol.replace("/", "").lower()
+        self.sym_dir = self.data_dir / self.safe
+
+        self.train_data = None
+        self.train_labels = None
+        self.train_mid = None
+        self.test_data = None
+        self.test_labels = None
+        self.test_mid = None
+
+        self._scaler_mean = None
+        self._scaler_std = None
+
+    def _raw(self, split: str):
+        path = self.sym_dir / f"{split}.npz"
+        if not path.exists():
+            raise FileNotFoundError(
+                f"No {split} data at {path}. Run:\n"
+                f"  python scripts/fetch_live_market_data.py --symbols {self.symbol}"
+            )
+        with np.load(path) as z:
+            return (
+                z["features"].astype(np.float64),
+                z["mid"].astype(np.float64),
+                z["label"].astype(np.int64),
+            )
+
+    def _to_stationary(self, feats: np.ndarray, mid: np.ndarray) -> np.ndarray:
+        """Convert absolute price levels to mid-relative fractions."""
+        out = feats.copy()
+        m = mid[:, None]
+        out[:, self._PRICE_COLS] = (out[:, self._PRICE_COLS] - m) / m
+        out[:, self._SPREAD_COL] = out[:, self._SPREAD_COL] / mid
+        # The mid column itself carries only level information, which the agent
+        # must not key on; replace it with the one-step realised return.
+        rets = np.zeros_like(mid)
+        rets[1:] = np.diff(mid) / mid[:-1]
+        out[:, self._MID_COL] = rets
+        return out
+
+    def load(self, split: str = "train"):
+        """
+        Load and scale one split. 'train' must be loaded before 'test' so the
+        scaler exists; calling load('test') first does that automatically.
+        """
+        if split == "test" and self._scaler_mean is None:
+            self.load("train")
+
+        feats, mid, labels = self._raw(split)
+        feats = self._to_stationary(feats, mid)
+
+        if split == "train":
+            self._scaler_mean = feats.mean(axis=0)
+            self._scaler_std = feats.std(axis=0)
+            # Constant columns (the reserved zero block) must not divide by ~0.
+            self._scaler_std[self._scaler_std < 1e-12] = 1.0
+
+        scaled = ((feats - self._scaler_mean) / self._scaler_std).astype(np.float32)
+
+        if split == "train":
+            self.train_data, self.train_mid, self.train_labels = scaled, mid, labels
+        else:
+            self.test_data, self.test_mid, self.test_labels = scaled, mid, labels
+
+        return scaled, labels
+
+    def prices(self, split: str = "train") -> np.ndarray:
+        """The causal mid-price series for `split`, in real units."""
+        if split == "train":
+            if self.train_mid is None:
+                self.load("train")
+            return self.train_mid
+        if self.test_mid is None:
+            self.load("test")
+        return self.test_mid

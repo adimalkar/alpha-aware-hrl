@@ -7,6 +7,7 @@ Temporal Point Process (TPP) and Transformer Hawkes Process (THP) models.
 """
 
 import os
+import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
@@ -112,6 +113,7 @@ class EventStreamPipeline:
         self,
         features: np.ndarray,
         labels: Optional[np.ndarray] = None,
+        timestamps: Optional[np.ndarray] = None,
     ) -> EventSequence:
         """
         Converts a sequence of normalized LOB feature vectors into an EventSequence.
@@ -119,7 +121,14 @@ class EventStreamPipeline:
         Args:
             features: (N, 144) LOB feature matrix
             labels: (N,) optional price movement labels
-            
+            timestamps: (N,) REAL wall-clock seconds for each snapshot. Strongly
+                recommended: a temporal point process is a model of when events
+                actually arrive, so fitting one to synthetic inter-arrival times
+                fits nothing. When omitted a uniform clock is used and a warning
+                is issued -- the previous implementation silently manufactured
+                dt as `base_time_step * exp(-|mid_diff|*5) + Exponential(...)`,
+                a deterministic function of the price move plus noise.
+
         Returns:
             EventSequence with detected events, continuous timestamps, and feature vectors.
         """
@@ -133,12 +142,32 @@ class EventStreamPipeline:
             )
 
         event_types = []
-        timestamps = []
+        event_times = []
         inter_arrival_times = []
         selected_features = []
         selected_labels = []
 
         current_time = 0.0
+
+        clock = None
+        if timestamps is not None:
+            clock = np.asarray(timestamps, dtype=np.float64).ravel()
+            if len(clock) != n_samples:
+                raise ValueError(
+                    f"timestamps has length {len(clock)} but features has {n_samples}."
+                )
+            clock = clock - clock[0]
+            if np.any(np.diff(clock) < 0):
+                raise ValueError("timestamps must be non-decreasing.")
+        else:
+            warnings.warn(
+                "detect_lob_events called without real timestamps; using a uniform "
+                "clock. Any Hawkes/TPP intensity fitted on this is modelling an "
+                "artefact of the sampling grid, not market event timing.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        last_event_time = 0.0
 
         # Feature mapping from FI-2010 normalization:
         # 0: Ask price 1, 1: Ask volume 1, 2: Bid price 1, 3: Bid volume 1
@@ -187,12 +216,17 @@ class EventStreamPipeline:
                     detected_type = 14 if feature_drift > 1.0 else 15  # volatility_spike / drop
 
             if detected_type is not None:
-                # Stochastic continuous inter-arrival time modeled inversely proportional to activity
-                dt = max(1e-4, self.base_time_step * np.exp(-abs(mid_diff) * 5.0) + np.random.exponential(self.base_time_step * 0.5))
-                current_time += dt
+                if clock is not None:
+                    event_time = float(clock[i])
+                    dt = max(1e-6, event_time - last_event_time)
+                    last_event_time = event_time
+                else:
+                    dt = self.base_time_step
+                    current_time += dt
+                    event_time = current_time
 
                 event_types.append(detected_type)
-                timestamps.append(current_time)
+                event_times.append(event_time)
                 inter_arrival_times.append(dt)
                 selected_features.append(curr_feat)
                 if labels is not None:
@@ -201,10 +235,16 @@ class EventStreamPipeline:
         if len(event_types) == 0:
             # Fallback if threshold was too strict: record periodic micro-ticks
             for i in range(0, n_samples, 5):
-                dt = self.base_time_step
-                current_time += dt
+                if clock is not None:
+                    event_time = float(clock[i])
+                    dt = max(1e-6, event_time - last_event_time)
+                    last_event_time = event_time
+                else:
+                    dt = self.base_time_step
+                    current_time += dt
+                    event_time = current_time
                 event_types.append(10 if features[i, 0] >= features[max(0, i-1), 0] else 11)
-                timestamps.append(current_time)
+                event_times.append(event_time)
                 inter_arrival_times.append(dt)
                 selected_features.append(features[i])
                 if labels is not None:
@@ -212,7 +252,7 @@ class EventStreamPipeline:
 
         return EventSequence(
             event_types=np.array(event_types, dtype=np.int64),
-            timestamps=np.array(timestamps, dtype=np.float32),
+            timestamps=np.array(event_times, dtype=np.float32),
             inter_arrival_times=np.array(inter_arrival_times, dtype=np.float32),
             features=np.array(selected_features, dtype=np.float32),
             labels=np.array(selected_labels, dtype=np.int64) if labels is not None else None,
@@ -223,6 +263,7 @@ class EventStreamPipeline:
         features: np.ndarray,
         labels: Optional[np.ndarray],
         output_path: Union[str, Path],
+        timestamps: Optional[np.ndarray] = None,
     ) -> EventSequence:
         """
         Processes LOB features into events and saves to an .npz cache file.
@@ -230,7 +271,7 @@ class EventStreamPipeline:
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        event_seq = self.detect_lob_events(features, labels)
+        event_seq = self.detect_lob_events(features, labels, timestamps=timestamps)
         np.savez_compressed(output_path, **event_seq.to_dict())
         print(f"[EventPipeline] Generated {len(event_seq)} events saved to {output_path}")
         return event_seq
@@ -269,19 +310,26 @@ class EventDataset(Dataset):
         ts = self.event_sequence.timestamps[start:end] - self.event_sequence.timestamps[start]
         feats = self.event_sequence.features[start:end]
 
-        # Padding if sequence shorter than seq_len
-        if len(types) < self.seq_len:
-            pad_len = self.seq_len - len(types)
+        # Padding if sequence shorter than seq_len. The mask marks padded
+        # positions (True = padding) so they can be excluded from the Hawkes
+        # log-likelihood; without it, padded slots were counted as real events
+        # and contributed a spurious survival term.
+        n_real = len(types)
+        mask = np.zeros(self.seq_len, dtype=bool)
+        if n_real < self.seq_len:
+            pad_len = self.seq_len - n_real
             types = np.pad(types, (0, pad_len), mode="constant", constant_values=0)
             dts = np.pad(dts, (0, pad_len), mode="constant", constant_values=1.0)
             ts = np.pad(ts, (0, pad_len), mode="edge")
             feats = np.pad(feats, ((0, pad_len), (0, 0)), mode="edge")
+            mask[n_real:] = True
 
         item = {
             "event_types": torch.tensor(types, dtype=torch.long),
             "inter_arrival_times": torch.tensor(dts, dtype=torch.float32),
             "timestamps": torch.tensor(ts, dtype=torch.float32),
             "features": torch.tensor(feats, dtype=torch.float32),
+            "mask": torch.tensor(mask, dtype=torch.bool),
         }
 
         if self.event_sequence.labels is not None:
