@@ -46,6 +46,29 @@ EXTRACTORS = {
 }
 
 
+def get_features_extractor(model):
+    """
+    Return the policy's features extractor.
+
+    SB3's off-policy algorithms (TQC/SAC) build separate actor and critic
+    extractors and leave `policy.features_extractor` as None, so reading that
+    attribute directly raises. On-policy algorithms (PPO) do populate it.
+    """
+    policy = model.policy
+    for attr in ("features_extractor",):
+        fe = getattr(policy, attr, None)
+        if fe is not None:
+            return fe
+    for owner in ("actor", "critic"):
+        sub = getattr(policy, owner, None)
+        fe = getattr(sub, "features_extractor", None) if sub is not None else None
+        if fe is not None:
+            return fe
+    raise AttributeError(
+        f"Could not locate a features extractor on {type(policy).__name__}."
+    )
+
+
 def make_env(loader, split, seq_len, episode_length, fee, seed):
     def _init():
         env = HistoricalLOBEnv(
@@ -157,7 +180,7 @@ def main():
                     device=device, seed=args.seed, policy_kwargs=policy_kwargs,
                     tensorboard_log=str(save_path / "tensorboard"))
 
-    fe = model.policy.features_extractor
+    fe = get_features_extractor(model)
     n_trainable = sum(p.numel() for p in fe.parameters() if p.requires_grad)
     print(f"  feature extractor: {type(fe).__name__}, {n_trainable:,} trainable params")
     if args.encoder == "lem":
