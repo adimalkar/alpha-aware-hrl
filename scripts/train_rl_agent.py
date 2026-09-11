@@ -138,6 +138,8 @@ def main():
     ap.add_argument("--fee", type=float, default=0.0005)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--save-dir", default="experiments/rl_run")
+    ap.add_argument("--eval-only", default=None,
+                    help="Path to a saved model; skip training and evaluate it")
     args = ap.parse_args()
 
     torch.manual_seed(args.seed)
@@ -219,13 +221,19 @@ def main():
         verbose=1,
     )
 
-    print(f"\n  training for {args.timesteps:,} timesteps on {device}...")
-    model.learn(total_timesteps=args.timesteps, callback=eval_cb, progress_bar=False)
-    model.save(str(save_path / "models" / "final_model"))
+    if args.eval_only:
+        print(f"\n  eval-only: loading {args.eval_only}")
+        algo_cls = TQC if args.algo == "TQC" else PPO
+        model = algo_cls.load(args.eval_only, env=train_env, device=device)
+        fe = get_features_extractor(model)
+    else:
+        print(f"\n  training for {args.timesteps:,} timesteps on {device}...")
+        model.learn(total_timesteps=args.timesteps, callback=eval_cb, progress_bar=False)
+        model.save(str(save_path / "models" / "final_model"))
 
     # Confirm the encoder actually moved during training.
     encoder_changed = None
-    if args.encoder == "lem" and not args.freeze_encoder:
+    if args.encoder == "lem" and not args.freeze_encoder and not args.eval_only:
         encoder_changed = any(
             p.grad is not None and p.grad.abs().sum() > 0
             for p in fe.encoder.parameters()
@@ -262,7 +270,10 @@ def main():
         "pretrained": args.pretrained,
         "freeze_encoder": args.freeze_encoder,
         "encoder_received_gradients": encoder_changed,
-        "timesteps": args.timesteps,
+        # Do not report a training budget for a run that did not train; the
+        # default arg value would otherwise be recorded as if it were real.
+        "timesteps": None if args.eval_only else args.timesteps,
+        "evaluated_checkpoint": args.eval_only,
         "provenance": provenance(args, data_dir=args.data_dir),
         "starting_capital": float(equity[0]),
         "final_portfolio": round(float(equity[-1]), 2),
@@ -271,6 +282,8 @@ def main():
         "annualised": metrics["annualised"],
         "max_drawdown_pct": round(metrics["max_drawdown_pct"], 4),
         "win_rate_pct": round(metrics["win_rate_pct"], 4),
+        "flat_rate_pct": round(metrics["flat_rate_pct"], 4),
+        "loss_rate_pct": round(metrics["loss_rate_pct"], 4),
         "var_95": round(metrics["var_95"], 6),
         "cvar_95": round(metrics["cvar_95"], 6),
         "eval_steps": len(rewards),
@@ -292,6 +305,14 @@ def main():
             "Position never changed during evaluation; this measures buy-and-hold "
             "or cash, not a learned policy."
         )
+
+    # Persist the equity curve so the result is inspectable and plottable,
+    # rather than only summarised.
+    np.savez_compressed(
+        save_path / "equity_curve.npz",
+        equity=equity, positions=positions,
+        benchmark_equity=bh_equity, prices=test_prices,
+    )
 
     with open(save_path / "evaluation_results.json", "w") as fh:
         json.dump(results, fh, indent=2)

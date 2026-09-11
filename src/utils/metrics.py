@@ -252,6 +252,21 @@ def compute_win_rate_pct(returns: np.ndarray) -> float:
     return float(np.sum(r > 0) / r.size * 100.0)
 
 
+def compute_flat_rate_pct(returns: np.ndarray) -> float:
+    """
+    Percentage of periods with EXACTLY zero return.
+
+    Without this, win rate is easy to misread. On sparsely-moving data an agent
+    holding a small position is flat most of the time, so `win_rate_pct` near 1
+    means "flat 99% of the time", not "loses 99% of the time". Reporting the two
+    together removes the ambiguity.
+    """
+    r = _as_returns(returns)
+    if r.size == 0:
+        return 0.0
+    return float(np.sum(r == 0.0) / r.size * 100.0)
+
+
 def compute_profit_factor(returns: np.ndarray) -> float:
     """Ratio of gross profit to gross loss."""
     r = _as_returns(returns)
@@ -318,6 +333,8 @@ def compute_all_metrics(
         "sortino_ratio": compute_sortino(returns, periods_per_year=periods_per_year),
         "max_drawdown_pct": compute_max_drawdown(equity_curve)[0],
         "win_rate_pct": compute_win_rate_pct(returns),
+        "flat_rate_pct": compute_flat_rate_pct(returns),
+        "loss_rate_pct": float(np.sum(returns < 0) / returns.size * 100.0),
         "profit_factor": compute_profit_factor(returns),
         "var_95": compute_var(returns, 0.95),
         "cvar_95": compute_cvar(returns, 0.95),

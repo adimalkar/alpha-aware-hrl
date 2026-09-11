@@ -1,0 +1,52 @@
+{
+  "symbol": "BTC/USD",
+  "encoder": "lem",
+  "algo": "TQC",
+  "pretrained": "checkpoints/event_encoder_thp.pt",
+  "freeze_encoder": false,
+  "encoder_received_gradients": null,
+  "timesteps": null,
+  "evaluated_checkpoint": "experiments/rl_run/models/best_model.zip",
+  "provenance": {
+    "utc": "2026-09-11T07:31:13+00:00",
+    "git_commit": "decbec6de0c41e1b87e17f696a83bb4460eb4411",
+    "git_dirty": true,
+    "python": "3.14.6",
+    "platform": "Linux-7.2.3-arch1-3-x86_64-with-glibc2.44",
+    "seed": 42,
+    "encoder": "lem",
+    "algo": "TQC",
+    "symbol": "BTC/USD",
+    "timesteps": 50000,
+    "pretrained": "checkpoints/event_encoder_thp.pt",
+    "data_dir": "data/live_market",
+    "data_digests": {
+      "btcusd/test.npz": "sha256:e3ffd1fbdfd10e32",
+      "btcusd/train.npz": "sha256:2cee0a29a9b763ef"
+    },
+    "torch": "2.14.0+cu130",
+    "cuda": true
+  },
+  "starting_capital": 99999.66858029366,
+  "final_portfolio": 99999.84,
+  "total_return_pct": 0.0002,
+  "sharpe_per_step": 0.0512,
+  "annualised": false,
+  "max_drawdown_pct": 0.0001,
+  "win_rate_pct": 2.0101,
+  "flat_rate_pct": 90.7035,
+  "loss_rate_pct": 7.2864,
+  "var_95": 0.0,
+  "cvar_95": 0.0,
+  "eval_steps": 399,
+  "n_return_periods": 398,
+  "mean_abs_position_weight": 0.006628,
+  "n_position_changes": 25,
+  "benchmark_buy_and_hold": {
+    "total_return_pct": 0.0343,
+    "sharpe_per_step": 0.0895,
+    "max_drawdown_pct": 0.0056
+  },
+  "excess_return_vs_buy_and_hold_pct": -0.0341,
+  "beats_buy_and_hold": false
+}

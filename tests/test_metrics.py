@@ -131,3 +131,26 @@ def test_all_metrics_reports_annualisation_flag():
     assert "calmar_ratio" not in m
     assert 0.0 <= m["max_drawdown_pct"] <= 100.0
     assert m["n_periods"] == 499
+
+
+def test_flat_rate_separates_zero_from_loss():
+    """
+    win_rate near zero is ambiguous on sparse data: it can mean 'mostly flat'
+    rather than 'mostly losing'. The two must be distinguishable.
+    """
+    from src.utils.metrics import compute_flat_rate_pct
+
+    r = np.array([0.0, 0.0, 0.0, 0.0, 0.01, -0.01])
+    assert compute_flat_rate_pct(r) == pytest.approx(100 * 4 / 6)
+    assert compute_win_rate_pct(r) == pytest.approx(100 * 1 / 6)
+
+
+def test_rates_sum_to_one_hundred():
+    rng = np.random.default_rng(7)
+    r = np.where(rng.random(1000) < 0.5, 0.0, rng.normal(0, 1e-3, 1000))
+    from src.utils.metrics import compute_flat_rate_pct
+
+    prices = 100.0 * np.cumprod(1 + rng.normal(0, 1e-3, 500))
+    m = compute_all_metrics(prices, np.ones(500))
+    total = m["win_rate_pct"] + m["flat_rate_pct"] + m["loss_rate_pct"]
+    assert total == pytest.approx(100.0)
