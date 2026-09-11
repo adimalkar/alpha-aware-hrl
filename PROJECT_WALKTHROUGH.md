@@ -1,3 +1,18 @@
+> **SUPERSEDED — 2026-09-11.**
+>
+> This document describes the project as "100% COMPLETE AND PUBLICATION-READY".
+> That claim did not survive audit. Every performance number it references was
+> produced by code with at least one defect sufficient to void it; the results
+> have been withdrawn to `experiments/INVALIDATED/`.
+>
+> See [AUDIT_FINDINGS.md](AUDIT_FINDINGS.md) for the 24 defects,
+> [REMEDIATION.md](REMEDIATION.md) for what was fixed, and
+> [README.md](README.md) for the current state.
+>
+> Retained as a historical record of what was believed at the time.
+
+---
+
 # Alpha-Aware Hierarchical Reinforcement Learning
 ## Comprehensive Project Walkthrough
 
