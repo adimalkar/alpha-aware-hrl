@@ -68,6 +68,30 @@ that would make this test meaningful.
 It is recorded here because it is the result. The previous version of this
 project reported Sharpe 2.14 from this same code path.
 
+### Second measurement: the agent learns to hold almost nothing
+
+TQC + the pretrained THP encoder, 15,000 timesteps, evaluated once on the
+sealed test split:
+
+| | Agent | Buy-and-hold |
+|---|---|---|
+| Total return | **+0.0002%** | **+0.0343%** |
+| Sharpe (per step) | 0.0512 | 0.0895 |
+| Max drawdown | 0.0001% | 0.0056% |
+
+`beats_buy_and_hold: false`. Position behaviour: **flat 90.7%** of periods,
+win 2.0%, loss 7.3%, mean |position weight| 0.0066.
+
+The agent learns to hold almost nothing, which is a coherent response to this
+data rather than a harness failure: a 0.2% total price range over the window
+against 5bp round-trip fees leaves no edge worth taking, so near-zero exposure
+is close to optimal. `encoder_received_gradients: true` confirms the encoder
+was genuinely trained rather than frozen.
+
+**This does not support a claim in either direction.** Twenty-five minutes of
+REST-polled data is far too thin to establish or refute an edge. It is
+published because it is what the pipeline measured.
+
 ---
 
 ## What the model is
