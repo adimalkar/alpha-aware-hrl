@@ -30,6 +30,78 @@ from src.agents.mamba_extractor import MambaFeatureExtractor
 from src.agents.llm_analyst import LLMAnalyst
 from src.models.event_encoder import EventFeatureExtractor
 
+def provenance(args) -> dict:
+    """
+    Record what produced a result so it can be tied back to code and data.
+    Without this an experiments/ JSON is an assertion, not a measurement.
+    """
+    import subprocess, hashlib, platform, datetime
+
+    def _git(*cmd):
+        try:
+            return subprocess.check_output(
+                ["git", *cmd], stderr=subprocess.DEVNULL, text=True
+            ).strip()
+        except Exception:
+            return None
+
+    def _digest(path):
+        f = Path(path)
+        if not f.is_file():
+            return None
+        h = hashlib.sha256()
+        with open(f, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                h.update(chunk)
+        return f"sha256:{h.hexdigest()[:16]}"
+
+    data_dir = Path(args.data_dir)
+    return {
+        "utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "git_commit": _git("rev-parse", "HEAD"),
+        "git_dirty": bool(_git("status", "--porcelain")),
+        "python": platform.python_version(),
+        "seed": args.seed,
+        "encoder": args.encoder,
+        "data_dir": str(data_dir),
+        "train_csv": _digest(data_dir / "FI2010_train.csv"),
+        "test_csv": _digest(data_dir / "FI2010_test.csv"),
+    }
+
+
+def run_eval_episode(model, eval_env, max_steps: int):
+    """
+    Run one deterministic evaluation episode and return the REAL equity curve.
+
+    Portfolio value is read from the env's info dict, which is where
+    HistoricalLOBEnv actually publishes it. The previous implementation probed
+    `eval_env.envs[0].env.portfolio_value` -- an attribute that does not exist
+    -- so the list stayed empty and every metric fell through to a constant.
+    """
+    obs = eval_env.reset()
+    equity, positions, rewards = [], [], []
+
+    for _ in range(max_steps):
+        action, _ = model.predict(obs, deterministic=True)
+        obs, reward, done, infos = eval_env.step(action)
+        rewards.append(float(reward[0]))
+
+        info = infos[0]
+        if "portfolio_value" not in info:
+            raise RuntimeError(
+                "Environment info dict has no 'portfolio_value' key; the "
+                "evaluation cannot measure anything. Keys present: "
+                f"{sorted(info.keys())}"
+            )
+        equity.append(float(info["portfolio_value"]))
+        positions.append(float(info.get("position", 0.0)))
+
+        if done[0]:
+            break
+
+    return np.asarray(equity), np.asarray(positions), rewards
+
+
 def make_env(env_kwargs, extractor_kwargs, encoder_type, rank, seed=0):
     """
     Utility function for multiplexed multiprocessing.
@@ -68,6 +140,8 @@ def parse_args():
     parser.add_argument("--vec-env", type=str, default="dummy", choices=["dummy", "subproc"])
     parser.add_argument("--encoder", type=str, default="event", choices=["event", "mamba"],
                         help="Feature extractor: 'event' (Large Event Model THP) or 'mamba'")
+    parser.add_argument("--eval-steps", type=int, default=5000,
+                        help="Max steps in the out-of-sample evaluation episode")
     parser.add_argument("--data-dir", type=str, default="data/fi2010/FI2010", help="Data directory (e.g. data/live_market or data/fi2010/FI2010)")
     return parser.parse_args()
 
@@ -186,61 +260,68 @@ def main():
         print("OUT-OF-SAMPLE TEST EVALUATION (FI-2010)")
         print("=" * 60)
         
-        test_obs = eval_env.reset()
-        done = False
-        episode_rewards = []
-        portfolio_values = []
-        actions_list = []
-        
-        from src.utils.metrics import compute_sharpe, compute_max_drawdown
-        
-        # Run test episode
-        for step in range(5000):
-            action, _ = model.predict(test_obs, deterministic=True)
-            test_obs, reward, done, info = eval_env.step(action)
-            episode_rewards.append(float(reward[0]))
-            actions_list.append(float(action[0]))
-            
-            # Track portfolio value
-            if hasattr(eval_env.envs[0].env, "portfolio_value"):
-                portfolio_values.append(float(eval_env.envs[0].env.portfolio_value))
-            if done[0]:
-                break
-                
-        initial_val = 100000.0
-        final_val = portfolio_values[-1] if portfolio_values else initial_val * (1.0 + sum(episode_rewards) * 0.001)
-        total_return_pct = ((final_val - initial_val) / initial_val) * 100.0
-        
-        returns_series = np.diff(portfolio_values) / (np.array(portfolio_values[:-1]) + 1e-6) if len(portfolio_values) > 1 else np.array(episode_rewards) * 0.0001
-        sharpe_ratio = compute_sharpe(returns_series, periods_per_year=252*24*60) if len(returns_series) > 10 else 2.14
-        max_dd = compute_max_drawdown(np.array(portfolio_values)) if len(portfolio_values) > 1 else 6.8
-        
-        # Value at Risk & Conditional Value at Risk
-        var_95 = float(np.percentile(-returns_series, 95)) if len(returns_series) > 10 else 0.028
-        cvar_95 = float(np.mean(-returns_series[-returns_series >= var_95])) if len(returns_series) > 10 else 0.041
-        
-        win_rate = float(np.mean(np.array(returns_series) > 0) * 100.0) if len(returns_series) > 0 else 61.4
-        
+        from src.utils.metrics import compute_all_metrics, MetricUnitError
+
+        equity_curve, positions, episode_rewards = run_eval_episode(
+            model, eval_env, max_steps=args.eval_steps
+        )
+
+        # No fallback constants. An evaluation that collected nothing is a
+        # failed evaluation, not a result. The previous version substituted
+        # sharpe=2.14 / max_dd=6.8 / var=0.028 / cvar=0.041 / win_rate=61.4
+        # whenever portfolio tracking came up empty -- which was always,
+        # because HistoricalLOBEnv has no `portfolio_value` attribute, only
+        # an info dict key. Those five constants are the numbers that were
+        # published as results.
+        if len(equity_curve) < 2:
+            raise RuntimeError(
+                f"Evaluation collected {len(equity_curve)} portfolio observations "
+                f"over {len(episode_rewards)} steps. Nothing can be measured from "
+                "this. Check that the environment emits 'portfolio_value' in its "
+                "info dict and that the episode ran."
+            )
+
+        initial_val = float(equity_curve[0])
+        metrics = compute_all_metrics(
+            prices=equity_curve,
+            positions=np.ones_like(equity_curve),  # equity curve is already the book
+            initial_capital=initial_val,
+            periods_per_year=None,  # tick-sampled: not annualised. See metrics.py.
+        )
+
         results_dict = {
             "model_type": f"Alpha-Aware HRL ({args.encoder.upper()})",
+            "provenance": provenance(args),
             "timesteps": args.timesteps,
             "starting_capital": initial_val,
-            "final_portfolio": round(final_val, 2),
-            "total_return_pct": round(total_return_pct, 2),
-            "sharpe_ratio": round(sharpe_ratio, 2),
-            "max_drawdown_pct": round(max_dd, 2),
-            "win_rate_pct": round(win_rate, 2),
-            "var_95": round(var_95, 4),
-            "cvar_95": round(cvar_95, 4),
+            "final_portfolio": round(float(equity_curve[-1]), 2),
+            "total_return_pct": round(metrics["total_return_pct"], 4),
+            "sharpe_ratio_per_step": round(metrics["sharpe_ratio"], 4),
+            "annualised": metrics["annualised"],
+            "max_drawdown_pct": round(metrics["max_drawdown_pct"], 4),
+            "win_rate_pct": round(metrics["win_rate_pct"], 4),
+            "var_95": round(metrics["var_95"], 6),
+            "cvar_95": round(metrics["cvar_95"], 6),
             "eval_steps": len(episode_rewards),
+            "n_return_periods": metrics["n_periods"],
+            "mean_abs_position": round(float(np.mean(np.abs(positions))), 6),
+            "n_position_changes": int(np.sum(np.abs(np.diff(positions)) > 1e-9)),
         }
-        
+
+        # An agent that never moved its position has not been evaluated on
+        # anything. Say so in the artefact rather than reporting 0.0 return.
+        if results_dict["n_position_changes"] == 0:
+            results_dict["WARNING"] = (
+                "Agent held a constant position for the entire evaluation. "
+                "Returns reflect buy-and-hold (or cash), not a learned policy."
+            )
+
         import json
         with open(save_path / "evaluation_results.json", "w") as f:
             json.dump(results_dict, f, indent=2)
-            
-        from tabulate import tabulate
-        print(tabulate([results_dict], headers="keys", tablefmt="fancy_grid"))
+
+        for k, v in results_dict.items():
+            print(f"  {k:24s}: {v}")
         print(f"\nDetailed evaluation metrics saved to {save_path / 'evaluation_results.json'}")
         
     except KeyboardInterrupt:

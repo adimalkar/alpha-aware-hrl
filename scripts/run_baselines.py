@@ -201,14 +201,18 @@ def evaluate_strategy(name, strategy_obj, env_kwargs, n_steps=31900):
     cvar = compute_cvar(returns)
     final_port = portfolio_history[-1]
     
+    # compute_max_drawdown already returns percent (see metrics unit contract);
+    # multiplying again here is what produced the 6619% drawdown in the
+    # committed baseline_metrics.json.
     return {
         "Name": name,
         "Final Portfolio": final_port,
         "Return %": ((final_port - 100000) / 100000) * 100,
         "Sharpe Ratio": sharpe,
-        "Max Drawdown %": mdd * 100,
-        "VaR (95%)": var * 100,
-        "CVaR (95%)": cvar * 100,
+        "Sharpe Annualised": False,
+        "Max Drawdown %": mdd,
+        "VaR (95%) %": var * 100,
+        "CVaR (95%) %": cvar * 100,
         "_history": portfolio_history
     }
 
