@@ -1,0 +1,49 @@
+{
+  "utc": "2026-09-11T06:43:40+00:00",
+  "exchange": "coinbase",
+  "poll_sec": 0.3,
+  "horizon": 10,
+  "threshold": 2e-05,
+  "test_frac": 0.2,
+  "purge": 50,
+  "symbols": {
+    "BTC/USD": {
+      "symbol": "BTC/USD",
+      "n_total": 5000,
+      "n_train": 3950,
+      "n_test": 1000,
+      "purged_rows": 50,
+      "span_minutes": 25.0,
+      "mid_first": 77185.905,
+      "mid_last": 77332.07500000001,
+      "mid_min": 77179.75,
+      "mid_max": 77332.07500000001,
+      "tick_return_std": 9.865770675535663e-06,
+      "frac_ticks_moved": 0.04700940188037608,
+      "label_counts_train": {
+        "0": 212,
+        "1": 3299,
+        "2": 439
+      }
+    },
+    "ETH/USD": {
+      "symbol": "ETH/USD",
+      "n_total": 5000,
+      "n_train": 3950,
+      "n_test": 1000,
+      "purged_rows": 50,
+      "span_minutes": 25.01,
+      "mid_first": 2469.045,
+      "mid_last": 2466.135,
+      "mid_min": 2466.135,
+      "mid_max": 2472.4849999999997,
+      "tick_return_std": 2.2344133463485782e-05,
+      "frac_ticks_moved": 0.13402680536107223,
+      "label_counts_train": {
+        "0": 854,
+        "1": 2227,
+        "2": 869
+      }
+    }
+  }
+}

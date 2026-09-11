@@ -59,13 +59,24 @@ mid). Pretraining the THP on its Hawkes log-likelihood for 60 epochs:
 | Homogeneous Poisson baseline | **−3.2030** |
 | Delta | **−0.1140** — the THP loses |
 
-This is explainable rather than surprising. REST polling on a fixed 0.3s grid
-makes inter-arrival times nearly constant, so there is no arrival-time
-structure for a Hawkes intensity to model — the encoder is being asked to
-model a clock. A websocket feed giving true event-time arrivals is the change
-that would make this test meaningful.
+Repeating on ETH/USD, collected over the same window, gives a second point:
 
-It is recorded here because it is the result. The previous version of this
+| Symbol | Ticks that moved the mid | THP val LL | Poisson LL | Delta |
+|---|---|---|---|---|
+| BTC/USD | 4.7% | −3.3171 | −3.2030 | **−0.1140** |
+| ETH/USD | 13.4% | −2.9407 | −2.9082 | **−0.0325** |
+
+The THP loses on both, but the gap narrows 3.5× as event density triples. That
+is consistent with the mechanism rather than with the model simply being wrong:
+REST polling on a fixed 0.3s grid makes inter-arrival times nearly constant, so
+on sparse data the encoder is being asked to model a clock. The denser the real
+event stream, the more there is for a Hawkes intensity to find.
+
+A websocket feed giving true event-time arrivals is therefore the change that
+would make this test meaningful — and the two points above are the reason to
+expect it to matter, not just a hope.
+
+These are recorded because they are the results. The previous version of this
 project reported Sharpe 2.14 from this same code path.
 
 ### Second measurement: the agent learns to hold almost nothing

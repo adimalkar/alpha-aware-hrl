@@ -44,3 +44,6 @@ experiments/**/*.png
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Dataset manifest is small provenance metadata - track it
+!data/live_market/manifest.json
