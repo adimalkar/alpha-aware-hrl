@@ -103,6 +103,42 @@ was genuinely trained rather than frozen.
 REST-polled data is far too thin to establish or refute an edge. It is
 published because it is what the pipeline measured.
 
+### Third measurement: training the encoder beats freezing it
+
+Four feature extractors, 2 seeds each, 4,000 timesteps, evaluated on the
+sealed split. `lem_frozen` is the original broken configuration — same
+encoder, gradients disabled.
+
+| Arm | Return % (mean) | ±CI95 | Sharpe/step | Traded |
+|---|---|---|---|---|
+| `lem` | **−0.00035** | ±0.00191 | −0.1254 | 2/2 |
+| `lem_frozen` | −0.00355 | ±0.00191 | −0.2429 | 2/2 |
+| `gru` | −0.01455 | ±0.05527 | −0.6711 | 2/2 |
+| `mlp` | −0.01800 | ±0.03939 | −0.5416 | 2/2 |
+
+Welch tests against `lem`: vs `lem_frozen` p = 0.0044; vs `gru` p = 0.189;
+vs `mlp` p = 0.110.
+
+The `lem` / `lem_frozen` gap is consistent in direction across both seeds and
+statistically detectable. That is the first evidence in this project that
+training the event encoder does anything at all — the comparison the original
+ablation claimed to make but could not, since every arm there ran the same
+LSTM and none received a gradient.
+
+Two caveats that matter more than the p-value:
+
+1. **The effect is economically negligible.** The difference is 0.0032
+   percentage points between two arms that are both approximately flat. A
+   detectable difference between two strategies that each do nothing is not a
+   trading result.
+2. **n = 2 is underpowered.** At two seeds the t critical value is 12.706, and
+   two runs that happen to agree can produce a small p-value by chance. The
+   harness prints an explicit underpowered warning below three seeds. Treat
+   this as directional, not established.
+
+`gru` and `mlp` are not distinguishable from `lem` at this sample size, and
+the honest reading of the bottom two rows is "no information".
+
 ---
 
 ## What the model is
