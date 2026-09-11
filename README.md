@@ -1,264 +1,208 @@
-# Alpha-Aware Hierarchical Reinforcement Learning & Large Event Model (LEM-HRL)
+# Alpha-Aware Hierarchical RL with a Transformer Hawkes Event Model
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![PyTorch 2.2+](https://img.shields.io/badge/PyTorch-2.2+-ee4c2c.svg)](https://pytorch.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Architecture: 1.3B Stack](https://img.shields.io/badge/Architecture-1.3B%20Hierarchical%20Stack-purple.svg)](#system-architecture)
-[![Live Exchange: Coinbase/Binance](https://img.shields.io/badge/Live%20Streaming-Coinbase%20%7C%20Binance-gold.svg)](#live-market-data-ingestion-path-2)
-
-An institutional-grade **1.3 Billion parameter Hierarchical Reinforcement Learning (HRL)** and **Continuous-Time Large Event Model (LEM)** architecture designed for autonomous quantitative trading, high-frequency limit order book (LOB) execution, and macroeconomic regime adaptation.
+Continuous-time event modelling for limit-order-book trading: a Transformer
+Hawkes Process (THP) encoder feeding a distributional RL agent (TQC), trained
+and evaluated on collected Level-2 market data.
 
 ---
 
-## 📑 Table of Contents
-- [Key Highlights](#-key-highlights)
-- [System Architecture](#-system-architecture)
-- [Continuous-Time Large Event Model (THP)](#-continuous-time-large-event-model-thp)
-- [Empirical Benchmarks & Performance](#-empirical-benchmarks--performance)
-- [Live Market Data Ingestion (Path 2)](#-live-market-data-ingestion-path-2)
-- [Interactive Dashboard & Telemetry](#-interactive-dashboard--telemetry)
-- [Repository Structure](#-repository-structure)
-- [Quickstart Guide](#-quickstart-guide)
-- [API & Telemetry Endpoints](#-api--telemetry-endpoints)
-- [Running Tests & Validations](#-running-tests--validations)
-- [License & Citation](#-license--citation)
+## Status
 
----
+**The results previously published in this README were invalid and have been
+withdrawn.** A validity audit ([AUDIT_FINDINGS.md](AUDIT_FINDINGS.md)) found 24
+defects, 7 individually sufficient to void every number in `experiments/`. Those
+artefacts are preserved under [`experiments/INVALIDATED/`](experiments/INVALIDATED/)
+with a per-directory explanation.
 
-## 🌟 Key Highlights
+The headline figure — `+6,260.91%` return, Sharpe `365.38` — was not an inflated
+result. It came from an evaluation branch that was never reached:
 
-- **Continuous-Time Large Event Model (LEM):** Replaces rigid fixed-interval time steps with a **Transformer Hawkes Process (THP)** that models non-stationary event arrivals $t_i$, inter-arrival intervals $\Delta t_i$, and self-exciting liquidity cascade intensities $\lambda_k(t)$.
-- **1.3 Billion Parameter Hierarchical AI Stack:**
-  - **Macro Level:** 1.1B TPP-LoRA News Semantic Analyst + 200M Google TimesFM Alpha Forecaster.
-  - **Micro Level:** 0.52M Continuous-Time Transformer Hawkes Process (THP) Microstructure Feature Extractor.
-  - **Execution Layer:** 2.4M Truncated Quantile Critic (**TQC**) & Distributional SAC Agent with CVaR ($95\%$) risk-trimming.
-- **Dynamic Multi-Horizon Regime Adaptation:** Disentangles market states into `[Safe, Risky, Crash]` with real-time confidence scores computed from macro headlines and Hawkes clustering.
-- **Live Exchange Streaming:** Real-time Level-2 Limit Order Book and trade flow ingestion via CCXT/WebSockets from **Coinbase**, **Binance**, and **Kraken**.
-- **Institutional Telemetry & Web Suite:** Real-time React + Vite + Tailwind glassmorphic dashboard with live hazard curves, order book depth queues, Hawkes burst alerts, and P&L monitors.
-
----
-
-## 🏗 System Architecture
-
-```
-                                  [ REAL-TIME FINANCIAL MARKETS ]
-                               (Coinbase / Binance L2 Streams & News)
-                                                 │
-                                                 ▼
- ┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
- │                                   1.3B HIERARCHICAL AI STACK                                    │
- ├─────────────────────────────────────────────────────────────────────────────────────────────────┤
- │                                                                                                 │
- │  ┌───────────────────────────────────────────────┐ ┌──────────────────────────────────────────┐  │
- │  │      1.1B TPP-LoRA SEMANTIC NEWS ANALYST      │ │     200M TIMESFM ALPHA FORECASTER      │  │
- │  │   (Temporal Point Process Event Clustering)   │ │    (Zero-Shot Multi-Horizon Trends)    │  │
- │  └───────────────────────┬───────────────────────┘ └────────────────────┬─────────────────────┘  │
- │                          │                                              │                        │
- │                          └──────────────────────┬───────────────────────┘                        │
- │                                                 ▼                                                │
- │                                [ DYNAMIC REGIME DETECTOR ]                                       │
- │                               (p_safe, p_risky, p_crash, conf)                                   │
- │                                                 │                                                │
- │                                                 ▼                                                │
- │                       ┌──────────────────────────────────────────────────┐                       │
- │                       │   0.52M TRANSFORMER HAWKES PROCESS (THP) LEM     │                       │
- │                       │  (Continuous-Time Δt LOB Microstructure Encoder) │                       │
- │                       └─────────────────────────┬────────────────────────┘                       │
- │                                                 │                                                │
- │                                                 ▼                                                │
- │                       ┌──────────────────────────────────────────────────┐                       │
- │                       │      2.4M DISTRIBUTIONAL RL TRADER (TQC/DSAC)    │                       │
- │                       │   (Truncated Quantile Risk-Budgeting & Actions)  │                       │
- │                       └─────────────────────────┬────────────────────────┘                       │
- │                                                 │                                                │
- └─────────────────────────────────────────────────┼───────────────────────────────────────────────┘
-                                                   ▼
-                                     [ OPTIMAL EXECUTION ACTIONS ]
-                                (Position Sizing, Stop-Loss, CVaR 95%)
+```python
+# scripts/run_cluster_training.py (removed)
+if hasattr(eval_env.envs[0].env, "portfolio_value"):      # always False
+    portfolio_values.append(...)
+...
+final_val    = portfolio_values[-1] if portfolio_values else initial_val * (1.0 + sum(episode_rewards) * 0.001)
+sharpe_ratio = compute_sharpe(...) if len(returns_series) > 10 else 2.14
+max_dd       = compute_max_drawdown(...) if len(portfolio_values) > 1 else 6.8
 ```
 
----
+`HistoricalLOBEnv` never defined a `portfolio_value` attribute — only a method
+and an info-dict key — so the list stayed empty, `final_portfolio` came from an
+invented formula, and `max_drawdown_pct: 6.8` in both committed result files is
+the literal `6.8` on the right-hand side of that `else`.
 
-## ⚡ Continuous-Time Large Event Model (THP)
+The codebase has been repaired. Current state:
 
-Markets do not tick on synchronized discrete clocks; transactions and order book cancellations arrive in continuous time. Our Large Event Model replaces standard discrete recurrent/Mamba layers with a **Transformer Hawkes Process**:
+| Component | State |
+|---|---|
+| Metrics | Fixed, 17 contract tests |
+| Environment | Fixed, 16 contract tests incl. a leakage regression guard |
+| Event encoder (LEM) | Trainable, receives gradients, 8 tests |
+| Data pipeline | Rewritten; real prices, temporal split with purge |
+| Ablation harness | Rewritten; honest arms, disjoint eval split |
+| **Published results** | **None yet — pipeline runs, numbers pending** |
 
-$$\lambda_k(t) = \text{softplus}\left( \mu_k + \sum_{t_j < t} \alpha_{k,m} \exp(-\beta_k (t - t_j)) + \mathbf{W}_h \mathbf{h}(t) \right)$$
-
-where:
-- $k \in \{\text{Safe}, \text{Risky}, \text{Crash}\}$ represents the market stability hazard head.
-- $\mathbf{h}(t)$ is the continuous temporal representation generated by the multi-head self-attention layer with sinusoidal continuous-time embeddings.
-- $\Delta t_i = t_i - t_{i-1}$ captures instantaneous microstructural speedups (e.g. queue depletion during flash crashes).
-
----
-
-## 📊 Empirical Benchmarks & Performance
-
-### 1. Out-of-Sample Test Evaluation on Live Coinbase Order Flow
-Evaluated across continuous Level-2 order flows (`BTC/USD`, `ETH/USD`, `SOL/USD`):
-
-| Model Architecture | Total Return (%) | Sharpe Ratio | Max Drawdown (%) | Win Rate (%) | VaR (95%) | CVaR (95%) |
-|---|---|---|---|---|---|---|
-| **Alpha-Aware LEM-HRL (Ours)** | **+6,260.91%** | **365.38** | **6.8%** | **76.05%** | **0.0137** | **0.0140** |
-| Mamba-HRL (Baseline) | +1,842.10% | 2.14 | 14.2% | 58.40% | 0.0245 | 0.0289 |
-| Traditional PPO | +310.40% | 0.94 | 26.5% | 51.20% | 0.0412 | 0.0498 |
-| Classic MACD / Rules-Based | -18.40% | -1.97 | 34.8% | 44.10% | 0.0510 | 0.0610 |
-
-### 2. Historical Limit Order Book Benchmark (FI-2010 Helsinki)
-Evaluated on 362,400 high-frequency stock ticks:
-- **LEM Event Convergence:** Evaluated episode reward peaked at **`+2,009.90`** (checkpoint saved to `experiments/real_data_lem_run/models/best_model.zip`).
-- **Hawkes Cascade Mitigation:** Reduced maximum tail drawdown by **`54.2%`** compared to standard unregularized RL agents.
+No performance claim appears in this README until it is produced by the
+repaired pipeline. That is the point.
 
 ---
 
-## 🌐 Live Market Data Ingestion (Path 2)
+## What the model is
 
-The engine includes a high-throughput multi-asset order book and trade ingestion pipeline connecting directly to live public exchange feeds:
+| Tier | Component | Parameters | Trained here? |
+|---|---|---|---|
+| Micro | Transformer Hawkes encoder (`src/models/event_encoder.py`) | 514,172 | **Yes** — Hawkes NLL pretraining, then RL fine-tuning |
+| Execution | TQC policy head, `net_arch=[256,256]` | ~2.4M | Yes |
+| Macro | `TPPLoRARegimeDetector` (`src/models/tpp_regime.py`) | 1,662,154 | No — random init, not currently used in training |
+| Macro | TinyLlama-1.1B (`src/agents/llm_analyst.py`) | 1.1B | No — pretrained, zero-shot prompting only |
+| Macro | TimesFM-200M (`src/models/timesfm_wrapper.py`) | 200M | No — pretrained, frozen by design |
 
-```bash
-# Fetch live Level-2 order books across BTC/USD, ETH/USD, SOL/USD from Coinbase Pro:
-python scripts/fetch_live_market_data.py
+The previous README described this as a "1.3 Billion parameter hierarchical AI
+stack". The trainable model is about **2.9M parameters**. The 1.3B figure summed
+two off-the-shelf pretrained models that are not trained, not fine-tuned, and in
+the case of TinyLlama bypassed entirely during training (`run_cluster_training.py`
+constructed it and then used a precomputed regime). `TPPLoRARegimeDetector` has
+no LoRA and no LLM — it is a hash-tokenised bag-of-embeddings.
+
+### The event model
+
+Order-book snapshots are mapped to a 20-type microstructure event vocabulary
+(`src/utils/event_pipeline.py`), embedded with continuous inter-arrival times,
+and encoded by a 3-layer causal transformer that predicts per-type conditional
+intensities λ_k(t). The encoder is pretrained by maximising the Hawkes
+log-likelihood
+
+    LL = Σᵢ log λ_{kᵢ}(tᵢ) − ∫ Σ_k λ_k(s) ds
+
+against a homogeneous-Poisson baseline, then fine-tuned by the RL objective.
+
+---
+
+## Data: why not FI-2010
+
+FI-2010 as distributed **cannot support a trading simulation**, and the original
+code hid this by deriving the traded price from the label:
+
+```python
+label = self.labels[data_idx]        # k-step-ahead direction
+if   label == 2: self.current_price *= 1.001
+elif label == 0: self.current_price *= 0.999
 ```
 
-This automates:
-1. Continuous Level-2 LOB depth polling (top 10 bids & asks).
-2. 144-dimensional feature extraction (spreads, volume imbalances, trade velocities).
-3. 20-class continuous event stream generation via `EventStreamPipeline` saved directly to `data/events/live_train_events.npz`.
+The label encodes the future, so reward at *t* was a deterministic function of
+*t+k* while the observation was the feature vector that label describes.
 
----
+Reconstructing a mid-price from the book does not work either. The CSVs are
+z-scored **per column**, which destroys order-book geometry. Measured over the
+first 50,000 training rows:
 
-## 🖥 Interactive Dashboard & Telemetry
-
-The repository includes a modern full-stack telemetry suite:
-- **Frontend:** React, Vite, Lucide Icons, Glassmorphism UI running on `http://localhost:5173`.
-- **Backend API:** Flask REST + Real-Time Telemetry server on `http://localhost:8000`.
-
-### Key Dashboard Views:
-- 📈 **`/dashboard`** — Live equity curves, real-time portfolio metrics, Sharpe ratio, and position indicators.
-- ⚡ **`/events`** — Continuous-time event sequence waterfall with timestamp deltas ($\Delta t$) and 20-class event taxonomy.
-- 🌊 **`/intensity`** — Real-time Transformer Hawkes Process hazard curves ($\lambda_{safe}, \lambda_{risky}, \lambda_{crash}$) and flash crash warning banners.
-- 🌐 **`/regimes`** — LLM-Analyst news breakdown, sentiment polarities, and market state allocations.
-- 📊 **`/baselines`** — Comparative benchmark analytics vs PPO, Mamba, and classic quant strategies.
-
----
-
-## 📁 Repository Structure
-
-```
-alpha-aware-hrl/
-├── api/
-│   └── server.py                 # REST & live streaming telemetry server
-├── configs/                      # Hyperparameter configs (LEM, Mamba, TQC)
-├── data/
-│   ├── events/                   # Continuous-time .npz event sequences
-│   ├── fi2010/                   # FI-2010 historical benchmark dataset
-│   ├── live_market/              # Live exchange LOB datasets (Coinbase/Binance)
-│   └── news/                     # FNSPID financial news records
-├── frontend/                     # React + Vite web dashboard
-│   ├── src/
-│   │   ├── components/           # Sidebar, Navbar, Charts, Widgets
-│   │   └── pages/                # EventStreamPage, IntensityPage, Dashboard, etc.
-├── scripts/
-│   ├── fetch_live_market_data.py # Live exchange data collector & event pipeline
-│   ├── run_cluster_training.py   # Vectorized cluster training with LEM/Mamba
-│   ├── run_event_benchmark.py    # Comparative benchmarking script
-│   └── precompute_regimes.py     # Hawkes & LLM regime precomputation
-├── src/
-│   ├── agents/                   # Hierarchical agent & LLM Analyst
-│   ├── envs/                     # Continuous LOB trading gym environments
-│   ├── models/
-│   │   ├── event_encoder.py      # Transformer Hawkes Process (THP) LEM
-│   │   ├── mamba_ssm.py          # Mamba State Space Model encoder
-│   │   └── tpp_regime.py         # TPP-LoRA news semantic detector
-│   ├── streaming/                # RingBuffer, feed adapters, & async loop
-│   └── utils/                    # Event pipeline, taxonomy, & loaders
-└── tests/                        # Comprehensive unit & integration tests
-```
-
----
-
-## 🚀 Quickstart Guide
-
-### 1. Environment Setup
-```bash
-# Clone repository
-git clone https://github.com/adimalkar/alpha-aware-hrl.git
-cd alpha-aware-hrl
-
-# Create conda or virtual environment
-conda create -n mamba_env python=3.10 -y
-conda activate mamba_env
-
-# Install PyTorch and dependencies
-pip install -r requirements.txt
-pip install ccxt sb3-contrib
-```
-
-### 2. Collect Live Data & Train Large Event Model
-```bash
-# Step 1: Acquire live Level-2 order flow from Coinbase
-python scripts/fetch_live_market_data.py
-
-# Step 2: Train the Large Event Model (THP) + TQC policy on live market data
-python scripts/run_cluster_training.py \
-    --data-dir data/live_market \
-    --encoder event \
-    --timesteps 20000 \
-    --n-envs 4 \
-    --save-dir experiments/live_data_lem_run
-```
-
-### 3. Launch Dashboard & Telemetry API
-```bash
-# Terminal 1: Launch Backend API Server (Port 8000)
-python api/server.py
-
-# Terminal 2: Launch Frontend Web Dashboard (Port 5173)
-cd frontend
-npm install
-npm run dev
-```
-
-Visit **`http://localhost:5173`** in your browser.
-
----
-
-## 📡 API & Telemetry Endpoints
-
-The backend server (`api/server.py`) exposes REST endpoints for automated trading and live telemetry:
-
-| Endpoint | Method | Description |
+| Property | Should hold | Actually holds |
 |---|---|---|
-| `/api/metrics` | `GET` | Current portfolio value, P&L %, Sharpe ratio, and drawdown |
-| `/api/stream/events` | `GET` | Real-time microsecond event stream with $\Delta t$ and event classes |
-| `/api/stream/intensity` | `GET` | Current Hawkes intensity hazard vectors $[\lambda_{safe}, \lambda_{risky}, \lambda_{crash}]$ |
-| `/api/regime/current` | `GET` | Active market regime classification and confidence scores |
-| `/api/benchmark` | `GET` | Comparative performance metrics across LEM, Mamba, and PPO |
+| `ask₁ > bid₁` | 100% | 51.3% |
+| `ask₁ < ask₂` | ~100% | 27.6% |
+| `bid₁ > bid₂` | ~100% | 24.2% |
+| reconstructed mid > 0 | always | crosses zero (min −1.065) |
+
+Every price column was standardised to the same distribution (mean ≈ −0.215,
+sd ≈ 0.676). No mid, spread, or return survives. FI-2010 supports exactly one
+task — supervised classification of the supplied label — which is what DeepLOB
+uses it for.
+
+`HistoricalLOBEnv` therefore requires an explicit price series and raises
+`PriceSourceError` rather than fabricating one.
 
 ---
 
-## 🧪 Running Tests & Validations
-
-Execute the full automated test suite (Hawkes encoder, TPP regime detector, continuous event pipeline, and gym environments):
+## Reproduce
 
 ```bash
-PYTHONPATH=. pytest tests/ -v
+python -m venv .venv
+./.venv/bin/pip install -r requirements.lock.txt   # pinned, Python 3.14.6
+
+# 1. Collect real Level-2 data (per symbol; real prices preserved,
+#    strictly temporal split with a purge gap, no tiling)
+./.venv/bin/python scripts/fetch_live_market_data.py \
+    --symbols BTC/USD ETH/USD --snapshots 5000 --poll-sec 0.3
+
+# 2. Pretrain the event encoder on the Hawkes likelihood
+./.venv/bin/python scripts/pretrain_event_encoder.py --symbol BTC/USD
+
+# 3. Train the agent, fine-tuning the encoder end-to-end
+./.venv/bin/python scripts/train_rl_agent.py --symbol BTC/USD --encoder lem \
+    --pretrained checkpoints/event_encoder_thp.pt
+
+# 4. Ablate against honest controls
+./.venv/bin/python scripts/run_ablations.py --symbol BTC/USD \
+    --arms lem lem_frozen gru mlp --seeds 0 1 2
+
+# Tests
+./.venv/bin/python -m pytest tests/ -q
+```
+
+`lem_frozen` deliberately reproduces the original broken configuration — encoder
+frozen, no gradients — as the control that shows what the withdrawn numbers
+actually measured.
+
+Every results file carries a `provenance` block: commit SHA, dirty flag,
+interpreter version, seed, and SHA-256 digests of the input data.
+
+### Known limitation of the current data path
+
+REST polling at ~3 snapshots/sec moves the BTC mid on roughly 8% of ticks, so
+returns are sparse and mostly zero. This is a property of polled data, stated
+rather than papered over. A websocket feed would give genuine event-time
+arrivals and is the natural next step — it would also let the THP model real
+inter-arrival times instead of a uniform sampling grid.
+
+---
+
+## Layout
+
+```
+├── src/
+│   ├── envs/
+│   │   ├── historical_lob_env.py   # replay env; refuses to fabricate a price
+│   │   └── sequence_wrapper.py     # emits raw windows for the policy to encode
+│   ├── models/
+│   │   ├── event_encoder.py        # Transformer Hawkes Process (the LEM)
+│   │   ├── tpp_regime.py           # news-event regime detector (untrained)
+│   │   └── timesfm_wrapper.py      # pretrained alpha forecaster (frozen)
+│   ├── agents/
+│   │   └── lem_extractor.py        # SB3 feature extractors (gradients reach these)
+│   └── utils/
+│       ├── metrics.py              # unit-enforced financial metrics
+│       ├── provenance.py           # commit + data digests for every artefact
+│       ├── event_pipeline.py       # 20-type event vocabulary
+│       └── data_loader.py          # FI-2010 + collected-market loaders
+├── scripts/
+│   ├── fetch_live_market_data.py   # L2 collection, real prices, purged split
+│   ├── pretrain_event_encoder.py   # Hawkes NLL pretraining + Poisson baseline
+│   ├── train_rl_agent.py           # RL training and out-of-sample evaluation
+│   ├── run_ablations.py            # honest arms, disjoint eval split
+│   └── run_event_benchmark.py      # latency only
+├── tests/                          # 51 tests
+├── AUDIT_FINDINGS.md               # the 24 defects
+└── experiments/INVALIDATED/        # withdrawn results, retained for the record
 ```
 
 ---
 
-## 📜 License & Citation
+## Audit summary
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+Full detail in [AUDIT_FINDINGS.md](AUDIT_FINDINGS.md). The defects that voided
+the published results:
 
-### Citation
-```bibtex
-@software{alpha_aware_lem_hrl_2026,
-  author = {Aditya Malkar},
-  title = {Alpha-Aware Hierarchical Reinforcement Learning with Continuous-Time Large Event Models},
-  year = {2026},
-  publisher = {GitHub},
-  journal = {GitHub repository},
-  howpublished = {\url{https://github.com/adimalkar/alpha-aware-hrl}}
-}
-```
+| ID | Defect | Status |
+|---|---|---|
+| L1 | Price path computed from the forward-looking label | Fixed — env requires a real price; regression test |
+| L2 | Live label was thresholded `feature[42]`, inside the observation | Fixed — labels are realised future moves, diagnostic only |
+| X1 | Test set tiled from train set + σ=0.003 noise **before** the split | Fixed — no tiling; temporal split with purge |
+| X2 | Ablation trained and evaluated on the same env object | Fixed — disjoint splits, different seeds |
+| D1 | Feature extractor never received a gradient | Fixed — moved into the policy; 8 tests |
+| D2 | Regime signal constant across all 362,400 rows | Documented; component excluded from training |
+| S1 | Mamba-vs-LSTM ablation contained no Mamba arm | Fixed — arms named for what they run |
+| M1 | Daily risk-free rate subtracted from tick returns, inverting Sharpe | Fixed — raises on frequency mismatch |
+| M2 | Max drawdown double-scaled (6619% reported) | Fixed — asserted into [0, 100] |
+| M3 | Hardcoded metric constants substituted for measurement | Fixed — evaluation raises instead |
+| R1 | Committed venv lacked sb3, pandas, flask; could not run the scripts | Fixed — `requirements.lock.txt` |
