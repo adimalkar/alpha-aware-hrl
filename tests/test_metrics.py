@@ -154,3 +154,17 @@ def test_rates_sum_to_one_hundred():
     m = compute_all_metrics(prices, np.ones(500))
     total = m["win_rate_pct"] + m["flat_rate_pct"] + m["loss_rate_pct"]
     assert total == pytest.approx(100.0)
+
+
+def test_t_critical_is_used_for_small_samples():
+    """
+    Regression guard for the ablation CI bug: at n=2 the correct multiplier is
+    t(0.975, df=1) = 12.706, not the normal 1.96. Using z understates the
+    interval 6.5x and makes indistinguishable arms look separated.
+    """
+    from scipy import stats
+
+    assert stats.t.ppf(0.975, 1) == pytest.approx(12.706, abs=1e-3)
+    assert stats.t.ppf(0.975, 1) / 1.96 > 6.0
+    # converges to the normal only for large n
+    assert stats.t.ppf(0.975, 200) == pytest.approx(1.96, abs=0.02)

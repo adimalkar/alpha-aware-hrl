@@ -203,42 +203,91 @@ def main():
                   f"maxDD {row['max_drawdown_pct']:.4f}%  traded={row['traded']}")
 
     # Aggregate across seeds. A single-seed number is not a result.
+    #
+    # The half-width uses the t critical value, not 1.96. With a handful of
+    # seeds the normal approximation is badly anti-conservative: at n=2 the
+    # correct multiplier is t(0.975, df=1) = 12.706, so using 1.96 understates
+    # the interval by 6.5x and makes indistinguishable arms look separated.
+    from scipy import stats as _stats
+
     summary = []
     for arm in args.arms:
         rows = [r for r in per_run if r["arm"] == arm]
         rets = np.array([r["total_return_pct"] for r in rows])
         shps = np.array([r["sharpe_per_step"] for r in rows])
         n = len(rows)
+        if n > 1:
+            tcrit = float(_stats.t.ppf(0.975, n - 1))
+            half = tcrit * float(rets.std(ddof=1)) / np.sqrt(n)
+        else:
+            tcrit, half = float("nan"), float("nan")
         summary.append({
             "arm": arm,
             "n_seeds": n,
-            "return_pct_mean": round(float(rets.mean()), 4),
-            "return_pct_std": round(float(rets.std(ddof=1)) if n > 1 else 0.0, 4),
-            "return_pct_ci95": round(float(1.96 * rets.std(ddof=1) / np.sqrt(n)) if n > 1 else 0.0, 4),
+            "return_pct_mean": round(float(rets.mean()), 5),
+            "return_pct_std": round(float(rets.std(ddof=1)) if n > 1 else 0.0, 5),
+            "return_pct_ci95_halfwidth": None if n < 2 else round(half, 5),
+            "t_critical": None if n < 2 else round(tcrit, 3),
+            "underpowered": n < 3,
             "sharpe_mean": round(float(shps.mean()), 4),
             "sharpe_std": round(float(shps.std(ddof=1)) if n > 1 else 0.0, 4),
             "arms_that_traded": int(sum(r["traded"] for r in rows)),
         })
+
+    # Pairwise Welch tests against the primary arm, so "A beats B" is a claim
+    # the data can be checked against rather than an eyeballed ordering.
+    comparisons = []
+    if len(args.arms) > 1 and len(args.seeds) > 1:
+        ref = args.arms[0]
+        ref_rets = np.array([r["total_return_pct"] for r in per_run if r["arm"] == ref])
+        for arm in args.arms[1:]:
+            other = np.array([r["total_return_pct"] for r in per_run if r["arm"] == arm])
+            t_stat, p_val = _stats.ttest_ind(ref_rets, other, equal_var=False)
+            comparisons.append({
+                "reference": ref,
+                "arm": arm,
+                "mean_diff": round(float(ref_rets.mean() - other.mean()), 5),
+                "welch_t": round(float(t_stat), 4),
+                "p_value": round(float(p_val), 4),
+                "significant_at_0.05": bool(p_val < 0.05),
+                "note": "n is small; treat any p-value here as indicative only",
+            })
 
     out = Path(args.save_dir)
     out.mkdir(parents=True, exist_ok=True)
     payload = {
         "provenance": provenance(args, data_dir=args.data_dir),
         "summary": summary,
+        "comparisons": comparisons,
         "per_run": per_run,
     }
     with open(out / "ablation_results.json", "w") as fh:
         json.dump(payload, fh, indent=2)
 
     print("\n" + "=" * 72)
-    hdr = f"{'arm':12s} {'n':>2s} {'return% mean':>13s} {'+-ci95':>8s} {'sharpe':>9s} {'traded':>7s}"
+    hdr = (f"{'arm':12s} {'n':>2s} {'return% mean':>14s} {'+-ci95':>10s} "
+           f"{'sharpe':>9s} {'traded':>7s}")
     print(hdr)
     print("-" * len(hdr))
-    for s in summary:
-        print(f"{s['arm']:12s} {s['n_seeds']:>2d} {s['return_pct_mean']:>13.4f} "
-              f"{s['return_pct_ci95']:>8.4f} {s['sharpe_mean']:>9.4f} "
-              f"{s['arms_that_traded']:>4d}/{s['n_seeds']}")
+    for row in summary:
+        hw = row["return_pct_ci95_halfwidth"]
+        print(f"{row['arm']:12s} {row['n_seeds']:>2d} {row['return_pct_mean']:>14.5f} "
+              f"{(hw if hw is not None else float('nan')):>10.5f} "
+              f"{row['sharpe_mean']:>9.4f} "
+              f"{row['arms_that_traded']:>4d}/{row['n_seeds']}")
     print("=" * 72)
+
+    if comparisons:
+        print("\nWelch tests vs " + comparisons[0]["reference"] + ":")
+        for c in comparisons:
+            verdict = "significant" if c["significant_at_0.05"] else "NOT significant"
+            print(f"  vs {c['arm']:12s} diff {c['mean_diff']:+.5f}  "
+                  f"p = {c['p_value']:.4f}  ({verdict} at 0.05)")
+
+    if any(r["underpowered"] for r in summary):
+        print("\n  WARNING: fewer than 3 seeds per arm. The t critical value is "
+              "large\n  at this n and these intervals are wide; no arm ordering "
+              "here is\n  established. Increase --seeds before quoting a winner.")
     print(f"saved -> {out / 'ablation_results.json'}")
 
 
