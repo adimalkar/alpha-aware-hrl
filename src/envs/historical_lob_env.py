@@ -36,6 +36,7 @@ them. If you cannot, this dataset cannot support a trading simulation, and the
 honest move is to evaluate the model as a classifier instead.
 """
 
+import warnings
 from typing import Any, Dict, Optional, Tuple
 
 import gymnasium as gym
@@ -125,6 +126,21 @@ class HistoricalLOBEnv(gym.Env):
                     f"Regime array from {regime_path} has length {len(regimes)} "
                     f"but the '{split}' split has {self.n_samples} rows. Refusing "
                     "to run with misaligned regimes."
+                )
+            # D2: every committed regime artefact is a single repeated value
+            # (train_regimes.npy = 2 x 362,400; test = 2 x 31,937; the live
+            # splits = 0 with confidence 0.95). The one-hot of a constant is an
+            # intercept, so a constant regime contributes nothing a bias term
+            # does not. Say so rather than letting it look like a live signal.
+            reg_col = regimes[:, 0] if regimes.ndim > 1 else regimes
+            if len(np.unique(reg_col)) == 1:
+                warnings.warn(
+                    f"Regime array from {regime_path} is constant "
+                    f"(value {reg_col[0]!r} across all {len(reg_col)} rows). It "
+                    "carries no information beyond an intercept; any 'regime-aware' "
+                    "claim based on it is unsupported.",
+                    RuntimeWarning,
+                    stacklevel=2,
                 )
             self.regimes = regimes
 

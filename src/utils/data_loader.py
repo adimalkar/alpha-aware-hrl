@@ -2,6 +2,8 @@
 Data Loading Utilities for FI-2010 and FNSPID Datasets
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -79,6 +81,23 @@ class FI2010DataLoader:
         
         # Clip labels to valid range (safety check)
         labels = np.clip(labels, 0, 2)
+
+        # R2: data/live_market/FI2010_*.csv contained Coinbase crypto snapshots,
+        # not FI-2010, and loaded through this class without complaint. A reader
+        # of the call site could not tell which asset class produced a result.
+        # FI-2010 is z-scored, so genuine FI-2010 features are O(1); real price
+        # levels are not.
+        max_abs = float(np.abs(features).max()) if features.size else 0.0
+        if max_abs > 50.0:
+            warnings.warn(
+                f"{file_path} has |max| feature value {max_abs:.1f}. FI-2010 is "
+                "z-score normalised and should be O(1); this looks like raw price "
+                "levels from a different dataset. Loading it through "
+                "FI2010DataLoader will silently mislabel the asset class -- use "
+                "LiveMarketDataLoader for collected market data.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         
         if split == "train":
             self.train_data = features
