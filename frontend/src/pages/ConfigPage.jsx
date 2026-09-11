@@ -37,20 +37,19 @@ export default function ConfigPage() {
       `[${new Date().toLocaleTimeString()}] Loading FI-2010 data...`,
     ]);
 
-    // Simulate training progress
-    let step = 0;
-    const interval = setInterval(() => {
-      step += Math.floor(config.timesteps / 20);
-      if (step >= config.timesteps) {
-        step = config.timesteps;
-        clearInterval(interval);
-        setIsRunning(false);
-        setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ✅ Training complete! Model saved.`]);
-      } else {
-        const reward = (-200 + step * 0.0005 + (Math.random() - 0.5) * 40).toFixed(1);
-        setLogs(prev => [...prev, `[Step ${step.toLocaleString()}] reward=${reward}  loss=${(2.5 - step * 0.000002).toFixed(4)}`]);
-      }
-    }, 1500);
+    // No simulated training. This block previously advanced a fake step
+    // counter, printed reward lines of the form
+    //   reward = -200 + step*0.0005 + (Math.random()-0.5)*40
+    // and finished with "Training complete! Model saved." -- without launching
+    // anything or writing any model. A UI that reports a completed training run
+    // that never happened is the most misleading surface in the project.
+    setLogs(prev => [
+      ...prev,
+      '[info] Launching training from the browser is not wired up.',
+      '[info] Run the command below in a terminal; progress goes to stdout',
+      '[info] and TensorBoard (experiments/rl_run/tensorboard).',
+    ]);
+    setIsRunning(false);
   };
 
   const handleStop = () => {
@@ -58,7 +57,7 @@ export default function ConfigPage() {
     setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ⚠ Training interrupted by user.`]);
   };
 
-  const cmd = `python scripts/run_cluster_training.py --timesteps ${config.timesteps} --n-envs ${config.nEnvs} --seed ${config.seed} --vec-env ${config.vecEnv}`;
+  const cmd = `python scripts/train_rl_agent.py \\\n    --symbol BTC/USD --encoder lem \\\n    --pretrained checkpoints/event_encoder_thp.pt \\\n    --timesteps ${config.timesteps} --seed ${config.seed}`;
 
   return (
     <div>
