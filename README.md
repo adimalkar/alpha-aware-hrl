@@ -41,10 +41,32 @@ The codebase has been repaired. Current state:
 | Event encoder (LEM) | Trainable, receives gradients, 8 tests |
 | Data pipeline | Rewritten; real prices, temporal split with purge |
 | Ablation harness | Rewritten; honest arms, disjoint eval split |
-| **Published results** | **None yet — pipeline runs, numbers pending** |
+| Dashboard | Rewritten; six pages rendered `Math.random()` as measurements |
+| **Published results** | **First measurement below; RL evaluation in progress** |
 
 No performance claim appears in this README until it is produced by the
 repaired pipeline. That is the point.
+
+### First measurement: the event encoder does not beat a Poisson baseline
+
+Collected 3,950 train / 1,000 test BTC/USD Level-2 snapshots over 25 minutes
+(mid $77,179.75–$77,332.08, tick return sd 9.87e-6, 4.7% of ticks moved the
+mid). Pretraining the THP on its Hawkes log-likelihood for 60 epochs:
+
+| | log-likelihood / event |
+|---|---|
+| THP (best val, epoch 59) | **−3.3171** |
+| Homogeneous Poisson baseline | **−3.2030** |
+| Delta | **−0.1140** — the THP loses |
+
+This is explainable rather than surprising. REST polling on a fixed 0.3s grid
+makes inter-arrival times nearly constant, so there is no arrival-time
+structure for a Hawkes intensity to model — the encoder is being asked to
+model a clock. A websocket feed giving true event-time arrivals is the change
+that would make this test meaningful.
+
+It is recorded here because it is the result. The previous version of this
+project reported Sharpe 2.14 from this same code path.
 
 ---
 
