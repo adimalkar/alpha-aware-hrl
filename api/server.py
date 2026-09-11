@@ -23,6 +23,7 @@ from src.streaming.inference_loop import StreamingInferenceEngine
 from src.utils.event_pipeline import EVENT_TYPES
 
 app = Flask(__name__)
+RESULTS_DIR = Path(__file__).resolve().parent.parent / "experiments"
 CORS(app)
 
 # Initialize Live Event Engine
@@ -81,40 +82,79 @@ def get_recent_events():
     })
 
 
+def _read_json(path):
+    """Read a results artefact, or None when the experiment has not been run."""
+    f = Path(path)
+    if not f.is_file():
+        return None
+    try:
+        with open(f) as fh:
+            return json.load(fh)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _no_data(what, how):
+    """
+    404 with instructions instead of invented numbers.
+
+    Every figure previously served from these two endpoints was a literal:
+    sharpe 2.14, maxDrawdown 6.8, winRate 61.4, totalTrades 5832, plus six
+    ablation rows for experiments that were never run at all. The dashboard
+    presented them as measurements.
+    """
+    return jsonify({
+        "error": "no_data",
+        "detail": f"{what} has not been produced by any run in this workspace.",
+        "how_to_generate": how,
+    }), 404
+
+
 @app.route("/api/metrics/summary", methods=["GET"])
 def get_summary_metrics():
-    telemetry = engine.get_telemetry()
+    results = _read_json(RESULTS_DIR / "rl_run" / "evaluation_results.json")
+    if results is None:
+        return _no_data(
+            "Evaluation summary",
+            "python scripts/train_rl_agent.py --symbol BTC/USD --encoder lem",
+        )
     return jsonify({
-        "sharpe": 2.14,
-        "totalReturn": telemetry["pnl_pct"],
-        "maxDrawdown": 6.8,
-        "winRate": 61.4,
-        "totalTrades": 5832,
-        "profitFactor": 1.78,
-        "var95": 2.8,
-        "cvar95": 4.1,
+        "source": "experiments/rl_run/evaluation_results.json",
+        "provenance": results.get("provenance"),
+        "sharpePerStep": results.get("sharpe_per_step"),
+        "annualised": results.get("annualised", False),
+        "totalReturnPct": results.get("total_return_pct"),
+        "maxDrawdownPct": results.get("max_drawdown_pct"),
+        "winRatePct": results.get("win_rate_pct"),
+        "var95": results.get("var_95"),
+        "cvar95": results.get("cvar_95"),
+        "evalSteps": results.get("eval_steps"),
+        "positionChanges": results.get("n_position_changes"),
+        "warning": results.get("WARNING"),
     })
 
 
 @app.route("/api/baselines", methods=["GET"])
 def get_baselines():
-    return jsonify({
-        "strategies": [
-            {"name": "Alpha-Aware LEM-HRL (Ours)", "finalPortfolio": 124850, "returnPct": 24.85, "sharpe": 2.14, "maxDrawdown": 6.8, "var95": 0.028, "cvar95": 0.041},
-            {"name": "Alpha-Aware Mamba-HRL", "finalPortfolio": 118420, "returnPct": 18.42, "sharpe": 1.87, "maxDrawdown": 8.2, "var95": 0.032, "cvar95": 0.048},
-            {"name": "MACD (Momentum)", "finalPortfolio": 127624, "returnPct": 27.62, "sharpe": -1.97, "maxDrawdown": 986.7, "var95": 0.100, "cvar95": 0.104},
-            {"name": "Bollinger Bands", "finalPortfolio": 33800, "returnPct": -66.19, "sharpe": -4.33, "maxDrawdown": 6619.9, "var95": 0.100, "cvar95": 0.103},
-            {"name": "Supervised LSTM", "finalPortfolio": 80172, "returnPct": -19.82, "sharpe": -5.54, "maxDrawdown": 2180.6, "var95": 0.010, "cvar95": 0.064},
-        ],
-        "ablations": [
-            {"variant": "Full Model (LEM + TPP + TQC)", "sharpe": 2.14, "maxDD": 6.8, "returnPct": 24.85},
-            {"variant": "Mamba-HRL (Fixed Interval)", "sharpe": 1.87, "maxDD": 8.2, "returnPct": 18.42},
-            {"variant": "No LLM/TPP Regime", "sharpe": 0.95, "maxDD": 14.5, "returnPct": 9.1},
-            {"variant": "No Event/Mamba Extractor", "sharpe": 0.62, "maxDD": 18.3, "returnPct": 5.8},
-            {"variant": "No Alpha Signal", "sharpe": 1.45, "maxDD": 10.1, "returnPct": 14.2},
-            {"variant": "Standard SAC (No TQC)", "sharpe": 1.12, "maxDD": 12.8, "returnPct": 11.6},
-        ]
-    })
+    ablations = _read_json(RESULTS_DIR / "ablations" / "ablation_results.json")
+    baselines = _read_json(RESULTS_DIR / "baselines" / "baseline_metrics.json")
+
+    if ablations is None and baselines is None:
+        return _no_data(
+            "Comparative results",
+            "python scripts/run_ablations.py --symbol BTC/USD",
+        )
+
+    payload = {"strategies": [], "ablations": []}
+    if baselines is not None:
+        payload["strategies"] = baselines
+        payload["strategies_source"] = "experiments/baselines/baseline_metrics.json"
+    if ablations is not None:
+        payload["ablations"] = ablations.get("summary", [])
+        payload["ablations_per_run"] = ablations.get("per_run", [])
+        payload["ablations_provenance"] = ablations.get("provenance")
+        payload["ablations_source"] = "experiments/ablations/ablation_results.json"
+    return jsonify(payload)
 
 
 @app.route("/api/training/launch", methods=["POST"])
