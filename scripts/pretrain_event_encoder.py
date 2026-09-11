@@ -35,9 +35,21 @@ from src.utils.event_pipeline import NUM_EVENT_TYPES, EventDataset, EventStreamP
 def build_events(loader, split, sensitivity):
     """Turn a split into an EventSequence using REAL collected timestamps."""
     feats, labels = loader.load(split)
-    path = loader.sym_dir / f"{split}.npz"
+    # 'val' is carved from the tail of the train file by the loader, so the
+    # timestamps must be sliced the same way rather than re-read wholesale.
+    source = "train" if split in ("train", "val") else split
+    path = loader.sym_dir / f"{source}.npz"
     with np.load(path) as z:
         stamps = z["timestamp"].astype(np.float64)
+    if split in ("train", "val") and loader.val_frac > 0:
+        n = len(stamps)
+        cut = int(n * (1.0 - loader.val_frac))
+        stamps = stamps[: cut - loader.purge] if split == "train" else stamps[cut:]
+    if len(stamps) != len(feats):
+        raise RuntimeError(
+            f"timestamp/feature length mismatch for split {split!r}: "
+            f"{len(stamps)} vs {len(feats)}"
+        )
 
     pipeline = EventStreamPipeline(sensitivity_threshold=sensitivity, feature_dim=feats.shape[1])
     seq = pipeline.detect_lob_events(feats, labels, timestamps=stamps)
@@ -110,8 +122,11 @@ def main():
     print("=" * 68)
 
     loader = LiveMarketDataLoader(args.data_dir, args.symbol)
+    # Validation comes from 'val', NOT 'test'. Early stopping on the test split
+    # is test-set reuse: the checkpoint is selected using the same data later
+    # used to report the result (audit X3).
     train_seq = build_events(loader, "train", args.sensitivity)
-    val_seq = build_events(loader, "test", args.sensitivity)
+    val_seq = build_events(loader, "val", args.sensitivity)
 
     print(f"  train events: {len(train_seq):>6}   val events: {len(val_seq):>6}")
     if len(train_seq) < args.seq_len * 2:
