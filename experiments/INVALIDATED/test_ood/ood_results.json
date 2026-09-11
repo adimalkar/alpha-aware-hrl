@@ -1,0 +1,44 @@
+{
+  "train_regime": "low",
+  "timesteps": 500,
+  "seed": 42,
+  "train_time_s": 271.7,
+  "results": [
+    {
+      "volatility_regime": "low",
+      "mean_reward": 0.0,
+      "std_reward": 0.0,
+      "min_reward": 0.0,
+      "max_reward": 0.0,
+      "mean_portfolio": 100000.0,
+      "std_portfolio": 0.0
+    },
+    {
+      "volatility_regime": "medium",
+      "mean_reward": 0.0,
+      "std_reward": 0.0,
+      "min_reward": 0.0,
+      "max_reward": 0.0,
+      "mean_portfolio": 100000.0,
+      "std_portfolio": 0.0
+    },
+    {
+      "volatility_regime": "high",
+      "mean_reward": 0.0,
+      "std_reward": 0.0,
+      "min_reward": 0.0,
+      "max_reward": 0.0,
+      "mean_portfolio": 100000.0,
+      "std_portfolio": 0.0
+    },
+    {
+      "volatility_regime": "crash",
+      "mean_reward": 0.0,
+      "std_reward": 0.0,
+      "min_reward": 0.0,
+      "max_reward": 0.0,
+      "mean_portfolio": 100000.0,
+      "std_portfolio": 0.0
+    }
+  ]
+}

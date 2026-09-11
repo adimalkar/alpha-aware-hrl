@@ -1,326 +1,294 @@
 #!/usr/bin/env python3
 """
-Ablation Study Script (Step 7)
+Ablation study over feature extractors, with honest arms and a real eval split.
 
-Trains and evaluates 4 model configurations to compare their performance:
-  1. TCN + PPO   — TCN backbone + PPO (baseline)
-  2. LSTM + PPO  — LSTM backbone + PPO (baseline)
-  3. LSTM + DSAC — LSTM backbone + TQC (no LLM, no alpha)
-  4. Full Model  — LSTM + TQC + LLM regime + Alpha signals
+Two defects in the previous version:
 
-Usage:
-    python scripts/run_ablations.py --timesteps 5000 --seed 42
-    python scripts/run_ablations.py --timesteps 50000 --save-dir experiments/ablations
+S1 -- the study was presented as evidence that Mamba beats LSTM, but no arm
+      ran Mamba. Every non-TCN arm constructed
+      `MambaFeatureExtractor(..., backend="lstm")`; the class name was the only
+      thing Mamba about it. Arms are now named for what they actually run.
+
+X2 -- `wrapped_env` was built once at :167, trained at :185/:198 and evaluated
+      at :223 on the SAME object. There was no eval env, no held-out split and
+      no seed change between phases. Train and eval now use disjoint temporal
+      splits.
+
+Arms:
+  lem         Transformer Hawkes encoder, trained end-to-end by the RL loss
+  lem_frozen  same encoder, gradients disabled -- reproduces the original
+              broken configuration on purpose, as the control that shows what
+              the published numbers actually measured
+  gru         recurrent baseline (this is what "mamba backend=lstm" really was)
+  mlp         flatten-and-MLP baseline
 """
 
-import sys
-sys.path.insert(0, '.')
-
 import argparse
-import time
 import json
-import numpy as np
-import torch
+import sys
+import time
 from pathlib import Path
 
-from src.envs.abides_wrapper import ABIDESEnv
-from src.envs.hierarchical_wrapper import HierarchicalEnvWrapper
-from src.agents.mamba_extractor import MambaFeatureExtractor
-from src.agents.llm_analyst import LLMAnalyst, RegimeSignal
-from src.agents.dsac_trader import DSACTrader
-from src.models.timesfm_wrapper import SimpleAlphaModel
-from src.models.mamba_ssm import TCNEncoder
+import numpy as np
+import torch
+
+sys.path.insert(0, ".")
+
+from sb3_contrib import TQC
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv
+
+from src.agents.lem_extractor import (
+    GRUWindowExtractor,
+    LEMFeaturesExtractor,
+    MLPWindowExtractor,
+)
+from src.envs.historical_lob_env import HistoricalLOBEnv
+from src.envs.sequence_wrapper import SequenceWindowWrapper
+from src.utils.data_loader import LiveMarketDataLoader
+from src.utils.metrics import compute_all_metrics
+from src.utils.provenance import provenance
+
+ARMS = {
+    "lem":        (LEMFeaturesExtractor, {}),
+    "lem_frozen": (LEMFeaturesExtractor, {"freeze_encoder": True}),
+    "gru":        (GRUWindowExtractor, {}),
+    "mlp":        (MLPWindowExtractor, {}),
+}
 
 
-class TCNFeatureExtractor:
-    """Adapter to make TCNEncoder compatible with HierarchicalEnvWrapper."""
-    
-    def __init__(self, input_dim=40, hidden_dim=128, n_layers=4, dropout=0.1):
-        self.encoder = TCNEncoder(
-            input_dim=input_dim,
-            hidden_dim=hidden_dim,
-            n_layers=n_layers,
-            dropout=dropout,
-        )
-        self._d_model = hidden_dim
-    
-    def __call__(self, x):
-        return self.encoder(x)
-    
-    def eval(self):
-        self.encoder.eval()
-        return self
-    
-    def cpu(self):
-        self.encoder.cpu()
-        return self
-    
-    def to(self, device):
-        self.encoder.to(device)
-        return self
-    
-    def get_output_dim(self):
-        return self._d_model
-    
-    def state_dict(self):
-        return self.encoder.state_dict()
-    
-    def parameters(self):
-        return self.encoder.parameters()
-
-
-def build_config(config_name, device="cpu"):
+def get_features_extractor(model):
     """
-    Build components for a specific ablation configuration.
-    
-    Returns:
-        dict with 'extractor', 'alpha_model', 'llm_analyst', 'rl_algo', 'obs_dim'
+    Return the policy's features extractor.
+
+    SB3's off-policy algorithms (TQC/SAC) build separate actor and critic
+    extractors and leave `policy.features_extractor` as None, so reading that
+    attribute directly raises. On-policy algorithms (PPO) do populate it.
     """
-    mamba_dim = 128
-    regime_dim = 4
-    alpha_dim = 0
-    
-    if config_name == "tcn_ppo":
-        extractor = TCNFeatureExtractor(input_dim=40, hidden_dim=mamba_dim, n_layers=4)
-        alpha_model = None
-        use_regime = False
-        rl_algo = "PPO"
-        
-    elif config_name == "lstm_ppo":
-        extractor = MambaFeatureExtractor(
-            input_dim=40, d_model=mamba_dim, n_layers=2, backend="lstm"
-        )
-        alpha_model = None
-        use_regime = False
-        rl_algo = "PPO"
-        
-    elif config_name == "lstm_dsac":
-        extractor = MambaFeatureExtractor(
-            input_dim=40, d_model=mamba_dim, n_layers=2, backend="lstm"
-        )
-        alpha_model = None
-        use_regime = False
-        rl_algo = "TQC"
-        
-    elif config_name == "full":
-        extractor = MambaFeatureExtractor(
-            input_dim=40, d_model=mamba_dim, n_layers=2, backend="lstm"
-        )
-        alpha_model = SimpleAlphaModel(input_dim=1, hidden_dim=64, n_layers=2)
-        alpha_model.eval()
-        use_regime = True
-        rl_algo = "TQC"
-        alpha_dim = 4
-        
-    else:
-        raise ValueError(f"Unknown config: {config_name}")
-    
-    total_obs_dim = mamba_dim + regime_dim + alpha_dim
-    
-    return {
-        "extractor": extractor,
-        "alpha_model": alpha_model,
-        "use_regime": use_regime,
-        "rl_algo": rl_algo,
-        "obs_dim": total_obs_dim,
-        "mamba_dim": mamba_dim,
-        "regime_dim": regime_dim,
-        "alpha_dim": alpha_dim,
-    }
+    policy = model.policy
+    for attr in ("features_extractor",):
+        fe = getattr(policy, attr, None)
+        if fe is not None:
+            return fe
+    for owner in ("actor", "critic"):
+        sub = getattr(policy, owner, None)
+        fe = getattr(sub, "features_extractor", None) if sub is not None else None
+        if fe is not None:
+            return fe
+    raise AttributeError(
+        f"Could not locate a features extractor on {type(policy).__name__}."
+    )
 
 
-def train_and_evaluate(config_name, timesteps, seed, save_dir, episode_length=200):
-    """Train a single ablation configuration and return metrics."""
-    
-    print(f"\n{'='*70}")
-    print(f"  Configuration: {config_name.upper()}")
-    print(f"  Timesteps: {timesteps}, Seed: {seed}")
-    print(f"{'='*70}")
-    
-    np.random.seed(seed)
+def build_env(loader, split, seq_len, episode_length, fee, seed):
+    def _init():
+        env = HistoricalLOBEnv(
+            data_loader=loader, split=split, episode_length=episode_length,
+            starting_cash=100000.0, transaction_fee=fee,
+            prices=loader.prices(split), reward="log_return",
+        )
+        wrapped = SequenceWindowWrapper(env, seq_len=seq_len)
+        wrapped.reset(seed=seed)
+        return Monitor(wrapped)
+    return _init
+
+
+def evaluate(model, env, max_steps):
+    obs = env.reset()
+    equity, positions = [], []
+    for _ in range(max_steps):
+        action, _ = model.predict(obs, deterministic=True)
+        obs, _, done, infos = env.step(action)
+        equity.append(float(infos[0]["portfolio_value"]))
+        positions.append(float(infos[0].get("position_weight", 0.0)))
+        if done[0]:
+            break
+    return np.asarray(equity), np.asarray(positions)
+
+
+def run_arm(arm, loader, args, seed):
+    cls, kwargs = ARMS[arm]
     torch.manual_seed(seed)
-    
-    device = "cpu"  # SB3 training on CPU for stability
-    
-    # Build components
-    cfg = build_config(config_name, device)
-    
-    # Build environment
-    base_env = ABIDESEnv(
-        ticker="AAPL",
-        starting_cash=100000.0,
-        episode_length=episode_length,
-        market_impact=True,
-        volatility_regime="medium",
+    np.random.seed(seed)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    train_env = DummyVecEnv([
+        build_env(loader, "train", args.seq_len, args.episode_length, args.fee, seed)
+    ])
+    eval_env = DummyVecEnv([
+        build_env(loader, "test", args.seq_len, args.eval_episode_length, args.fee,
+                  seed + 10_000)
+    ])
+
+    if arm.startswith("lem") and args.pretrained:
+        kwargs = {**kwargs, "pretrained_path": args.pretrained}
+
+    model = TQC(
+        "MultiInputPolicy", train_env, learning_rate=3e-4, batch_size=256,
+        learning_starts=min(1000, args.timesteps // 4), gamma=0.99, tau=0.005,
+        verbose=0, device=device, seed=seed,
+        policy_kwargs=dict(
+            features_extractor_class=cls,
+            features_extractor_kwargs=kwargs,
+            net_arch=[256, 256],
+        ),
     )
-    
-    # Build LLM analyst (lightweight — only used for regime embedding)
-    llm_analyst = LLMAnalyst(device="cpu")
-    
-    # Inject a static regime if this config uses it
-    if cfg["use_regime"]:
-        base_env.current_regime = RegimeSignal(
-            regime=0, confidence=0.9, reasoning="Pre-set for ablation"
-        )
-    
-    # Wrap environment
-    wrapped_env = HierarchicalEnvWrapper(
-        env=base_env,
-        mamba_extractor=cfg["extractor"],
-        llm_analyst=llm_analyst,
-        alpha_model=cfg["alpha_model"],
-        device=device,
-    )
-    
-    print(f"  Observation space: {wrapped_env.observation_space.shape}")
-    print(f"  Action space: {wrapped_env.action_space.shape}")
-    print(f"  RL Algorithm: {cfg['rl_algo']}")
-    
-    # Build RL model
-    start_time = time.time()
-    
-    if cfg["rl_algo"] == "TQC":
-        from sb3_contrib import TQC
-        model = TQC(
-            "MlpPolicy", wrapped_env,
-            learning_rate=3e-4,
-            batch_size=256,
-            gamma=0.99,
-            tau=0.005,
-            verbose=0,
-            device=device,
-            seed=seed,
-            policy_kwargs=dict(net_arch=[256, 256], n_critics=2),
-        )
-    else:  # PPO
-        from stable_baselines3 import PPO
-        model = PPO(
-            "MlpPolicy", wrapped_env,
-            learning_rate=3e-4,
-            n_steps=128,
-            batch_size=64,
-            n_epochs=10,
-            gamma=0.99,
-            verbose=0,
-            device=device,
-            seed=seed,
-            policy_kwargs=dict(net_arch=[256, 256]),
-        )
-    
-    # Train
-    print(f"  Training...")
-    model.learn(total_timesteps=timesteps, progress_bar=False)
-    train_time = time.time() - start_time
-    print(f"  Training completed in {train_time:.1f}s")
-    
-    # Evaluate
-    print(f"  Evaluating...")
-    n_eval_episodes = 10
-    rewards = []
-    portfolio_values = []
-    
-    for ep in range(n_eval_episodes):
-        obs, info = wrapped_env.reset()
-        episode_reward = 0
-        done = False
-        
-        while not done:
-            action, _ = model.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, info = wrapped_env.step(action)
-            episode_reward += reward
-            done = terminated or truncated
-        
-        rewards.append(episode_reward)
-        portfolio_values.append(info.get("portfolio_value", 0))
-    
-    results = {
-        "config": config_name,
+
+    fe = get_features_extractor(model)
+    n_trainable = sum(p.numel() for p in fe.parameters() if p.requires_grad)
+
+    t0 = time.time()
+    model.learn(total_timesteps=args.timesteps, progress_bar=False)
+    train_time = time.time() - t0
+
+    equity, positions = evaluate(model, eval_env, args.eval_steps)
+    if len(equity) < 2:
+        raise RuntimeError(f"arm {arm} seed {seed}: evaluation collected {len(equity)} points")
+
+    m = compute_all_metrics(equity, np.ones_like(equity), float(equity[0]), periods_per_year=None)
+    n_changes = int(np.sum(np.abs(np.diff(positions)) > 1e-9))
+
+    return {
+        "arm": arm,
         "seed": seed,
-        "timesteps": timesteps,
+        "timesteps": args.timesteps,
+        "trainable_extractor_params": n_trainable,
+        "encoder_frozen": bool(kwargs.get("freeze_encoder", False)),
         "train_time_s": round(train_time, 1),
-        "mean_reward": round(float(np.mean(rewards)), 6),
-        "std_reward": round(float(np.std(rewards)), 6),
-        "min_reward": round(float(np.min(rewards)), 6),
-        "max_reward": round(float(np.max(rewards)), 6),
-        "mean_portfolio": round(float(np.mean(portfolio_values)), 2),
-        "obs_dim": cfg["obs_dim"],
-        "rl_algo": cfg["rl_algo"],
+        "total_return_pct": round(m["total_return_pct"], 4),
+        "sharpe_per_step": round(m["sharpe_ratio"], 4),
+        "max_drawdown_pct": round(m["max_drawdown_pct"], 4),
+        "win_rate_pct": round(m["win_rate_pct"], 4),
+        "final_portfolio": round(float(equity[-1]), 2),
+        "eval_steps": len(equity),
+        "mean_abs_position_weight": round(float(np.mean(np.abs(positions))), 6),
+        "n_position_changes": n_changes,
+        "traded": n_changes > 0,
     }
-    
-    # Save model
-    config_save_path = Path(save_dir) / config_name
-    config_save_path.mkdir(parents=True, exist_ok=True)
-    model.save(str(config_save_path / f"model_seed{seed}"))
-    
-    print(f"  Results: mean_reward={results['mean_reward']:.6f}, "
-          f"mean_portfolio=${results['mean_portfolio']:.2f}")
-    
-    return results
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run Ablation Studies (Step 7)")
-    parser.add_argument("--timesteps", type=int, default=5000, help="Training timesteps per config")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--save-dir", type=str, default="experiments/ablations", help="Save directory")
-    parser.add_argument("--episode-length", type=int, default=200, help="Episode length")
-    parser.add_argument("--configs", type=str, default="all",
-                        help="Comma-separated configs to run (tcn_ppo,lstm_ppo,lstm_dsac,full) or 'all'")
-    args = parser.parse_args()
-    
-    Path(args.save_dir).mkdir(parents=True, exist_ok=True)
-    
-    if args.configs == "all":
-        configs = ["tcn_ppo", "lstm_ppo", "lstm_dsac", "full"]
-    else:
-        configs = [c.strip() for c in args.configs.split(",")]
-    
-    print("=" * 70)
-    print("ABLATION STUDY — Alpha-Aware Hierarchical RL")
-    print("=" * 70)
-    print(f"Configs:   {configs}")
-    print(f"Timesteps: {args.timesteps}")
-    print(f"Seed:      {args.seed}")
-    print(f"Save dir:  {args.save_dir}")
-    
-    all_results = []
-    
-    for config_name in configs:
-        try:
-            result = train_and_evaluate(
-                config_name=config_name,
-                timesteps=args.timesteps,
-                seed=args.seed,
-                save_dir=args.save_dir,
-                episode_length=args.episode_length,
-            )
-            all_results.append(result)
-        except Exception as e:
-            print(f"\n  ❌ Config '{config_name}' FAILED: {e}")
-            import traceback
-            traceback.print_exc()
-            all_results.append({"config": config_name, "error": str(e)})
-    
-    # Print comparison table
-    print("\n" + "=" * 70)
-    print("ABLATION RESULTS SUMMARY")
-    print("=" * 70)
-    print(f"{'Config':<15} {'RL Algo':<8} {'Obs Dim':<8} {'Mean Reward':<14} {'Std Reward':<12} {'Portfolio':<12} {'Time(s)':<8}")
-    print("-" * 70)
-    
-    for r in all_results:
-        if "error" in r:
-            print(f"{r['config']:<15} FAILED: {r['error']}")
+    ap = argparse.ArgumentParser(description="Feature-extractor ablation")
+    ap.add_argument("--data-dir", default="data/live_market")
+    ap.add_argument("--symbol", default="BTC/USD")
+    ap.add_argument("--arms", nargs="+", default=list(ARMS), choices=list(ARMS))
+    ap.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
+    ap.add_argument("--timesteps", type=int, default=20_000)
+    ap.add_argument("--seq-len", type=int, default=32)
+    ap.add_argument("--episode-length", type=int, default=500)
+    ap.add_argument("--eval-episode-length", type=int, default=400)
+    ap.add_argument("--eval-steps", type=int, default=2000)
+    ap.add_argument("--fee", type=float, default=0.0005)
+    ap.add_argument("--pretrained", default=None)
+    ap.add_argument("--save-dir", default="experiments/ablations")
+    args = ap.parse_args()
+
+    loader = LiveMarketDataLoader(args.data_dir, args.symbol)
+    loader.load("train")
+    loader.load("test")
+
+    print("=" * 72)
+    print(f"ABLATION  |  {args.symbol}  |  arms={args.arms}  seeds={args.seeds}")
+    print(f"train rows {len(loader.train_data)}  test rows {len(loader.test_data)}")
+    print("=" * 72)
+
+    per_run = []
+    for arm in args.arms:
+        for seed in args.seeds:
+            print(f"\n  {arm} (seed {seed}) ...", flush=True)
+            row = run_arm(arm, loader, args, seed)
+            per_run.append(row)
+            print(f"    return {row['total_return_pct']:+.4f}%  "
+                  f"sharpe/step {row['sharpe_per_step']:+.4f}  "
+                  f"maxDD {row['max_drawdown_pct']:.4f}%  traded={row['traded']}")
+
+    # Aggregate across seeds. A single-seed number is not a result.
+    #
+    # The half-width uses the t critical value, not 1.96. With a handful of
+    # seeds the normal approximation is badly anti-conservative: at n=2 the
+    # correct multiplier is t(0.975, df=1) = 12.706, so using 1.96 understates
+    # the interval by 6.5x and makes indistinguishable arms look separated.
+    from scipy import stats as _stats
+
+    summary = []
+    for arm in args.arms:
+        rows = [r for r in per_run if r["arm"] == arm]
+        rets = np.array([r["total_return_pct"] for r in rows])
+        shps = np.array([r["sharpe_per_step"] for r in rows])
+        n = len(rows)
+        if n > 1:
+            tcrit = float(_stats.t.ppf(0.975, n - 1))
+            half = tcrit * float(rets.std(ddof=1)) / np.sqrt(n)
         else:
-            print(f"{r['config']:<15} {r['rl_algo']:<8} {r['obs_dim']:<8} "
-                  f"{r['mean_reward']:<14.6f} {r['std_reward']:<12.6f} "
-                  f"${r['mean_portfolio']:<11.2f} {r['train_time_s']:<8.1f}")
-    
-    # Save results to JSON
-    results_path = Path(args.save_dir) / "ablation_results.json"
-    with open(results_path, "w") as f:
-        json.dump(all_results, f, indent=2)
-    print(f"\nResults saved to {results_path}")
+            tcrit, half = float("nan"), float("nan")
+        summary.append({
+            "arm": arm,
+            "n_seeds": n,
+            "return_pct_mean": round(float(rets.mean()), 5),
+            "return_pct_std": round(float(rets.std(ddof=1)) if n > 1 else 0.0, 5),
+            "return_pct_ci95_halfwidth": None if n < 2 else round(half, 5),
+            "t_critical": None if n < 2 else round(tcrit, 3),
+            "underpowered": n < 3,
+            "sharpe_mean": round(float(shps.mean()), 4),
+            "sharpe_std": round(float(shps.std(ddof=1)) if n > 1 else 0.0, 4),
+            "arms_that_traded": int(sum(r["traded"] for r in rows)),
+        })
+
+    # Pairwise Welch tests against the primary arm, so "A beats B" is a claim
+    # the data can be checked against rather than an eyeballed ordering.
+    comparisons = []
+    if len(args.arms) > 1 and len(args.seeds) > 1:
+        ref = args.arms[0]
+        ref_rets = np.array([r["total_return_pct"] for r in per_run if r["arm"] == ref])
+        for arm in args.arms[1:]:
+            other = np.array([r["total_return_pct"] for r in per_run if r["arm"] == arm])
+            t_stat, p_val = _stats.ttest_ind(ref_rets, other, equal_var=False)
+            comparisons.append({
+                "reference": ref,
+                "arm": arm,
+                "mean_diff": round(float(ref_rets.mean() - other.mean()), 5),
+                "welch_t": round(float(t_stat), 4),
+                "p_value": round(float(p_val), 4),
+                "significant_at_0.05": bool(p_val < 0.05),
+                "note": "n is small; treat any p-value here as indicative only",
+            })
+
+    out = Path(args.save_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "provenance": provenance(args, data_dir=args.data_dir),
+        "summary": summary,
+        "comparisons": comparisons,
+        "per_run": per_run,
+    }
+    with open(out / "ablation_results.json", "w") as fh:
+        json.dump(payload, fh, indent=2)
+
+    print("\n" + "=" * 72)
+    hdr = (f"{'arm':12s} {'n':>2s} {'return% mean':>14s} {'+-ci95':>10s} "
+           f"{'sharpe':>9s} {'traded':>7s}")
+    print(hdr)
+    print("-" * len(hdr))
+    for row in summary:
+        hw = row["return_pct_ci95_halfwidth"]
+        print(f"{row['arm']:12s} {row['n_seeds']:>2d} {row['return_pct_mean']:>14.5f} "
+              f"{(hw if hw is not None else float('nan')):>10.5f} "
+              f"{row['sharpe_mean']:>9.4f} "
+              f"{row['arms_that_traded']:>4d}/{row['n_seeds']}")
+    print("=" * 72)
+
+    if comparisons:
+        print("\nWelch tests vs " + comparisons[0]["reference"] + ":")
+        for c in comparisons:
+            verdict = "significant" if c["significant_at_0.05"] else "NOT significant"
+            print(f"  vs {c['arm']:12s} diff {c['mean_diff']:+.5f}  "
+                  f"p = {c['p_value']:.4f}  ({verdict} at 0.05)")
+
+    if any(r["underpowered"] for r in summary):
+        print("\n  WARNING: fewer than 3 seeds per arm. The t critical value is "
+              "large\n  at this n and these intervals are wide; no arm ordering "
+              "here is\n  established. Increase --seeds before quoting a winner.")
+    print(f"saved -> {out / 'ablation_results.json'}")
 
 
 if __name__ == "__main__":

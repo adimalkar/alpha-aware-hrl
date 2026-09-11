@@ -234,27 +234,48 @@ class TransformerHawkesEncoder(nn.Module):
         mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
-        Computes the log-likelihood of the event sequence under the Hawkes model:
-        LL = sum_{i} log λ_{k_i}(t_i) - int_0^T sum_k λ_k(s) ds
+        Negative-free log-likelihood of the event sequence under the THP:
+
+            LL = sum_i [ log lambda_{k_i}(t_i) - integral over (t_{i-1}, t_i] ]
+
+        The intensity that scores event i is produced from the hidden state at
+        position i-1, so it is conditioned strictly on the history BEFORE t_i.
+
+        This shift is load-bearing. The encoder's causal mask is
+        `triu(ones, diagonal=1)`, which lets position i attend to itself, so the
+        hidden state at i already contains event i's own type embedding. Scoring
+        event i with the intensity at position i therefore lets the model read
+        the answer off its own input, and the likelihood is maximised by a
+        degenerate solution that has learned nothing about arrival dynamics.
+
+        Returns the mean per-event log-likelihood (higher is better).
         """
         hidden, intensities, _ = self.forward(
             event_types, timestamps, inter_arrival_times, features, mask
         )
-        
-        # 1. Event log-intensity term: log λ_{k_i}(t_i)
-        # intensities: (B, L, K), event_types: (B, L)
-        event_intensities = intensities.gather(dim=-1, index=event_types.unsqueeze(-1)).squeeze(-1)
-        log_term = torch.log(event_intensities + 1e-8)
 
-        # 2. Integral survival term approximation via Riemann sum: sum_k λ_k(t_i) * dt_i
-        total_intensity = intensities.sum(dim=-1)  # (B, L)
-        survival_term = total_intensity * inter_arrival_times
+        # Align: intensity from history up to i-1 scores the event at i.
+        pred_intensities = intensities[:, :-1, :]      # (B, L-1, K)
+        target_types = event_types[:, 1:]              # (B, L-1)
+        target_dt = inter_arrival_times[:, 1:]         # (B, L-1)
+
+        # 1. Event term: log lambda_{k_i}(t_i)
+        event_intensity = pred_intensities.gather(
+            dim=-1, index=target_types.unsqueeze(-1)
+        ).squeeze(-1)
+        log_term = torch.log(event_intensity.clamp(min=1e-8))
+
+        # 2. Compensator, approximated on the interval by a left Riemann sum:
+        #    integral ~= sum_k lambda_k(t_{i-1}) * (t_i - t_{i-1})
+        survival_term = pred_intensities.sum(dim=-1) * target_dt
 
         ll = log_term - survival_term
 
+        # A pair (i-1, i) is valid only if neither position is padding.
         if mask is not None:
-            ll = ll.masked_fill(mask, 0.0)
-            return ll.sum() / (~mask).sum().clamp(min=1)
+            valid = (~mask[:, :-1]) & (~mask[:, 1:])
+            ll = ll.masked_fill(~valid, 0.0)
+            return ll.sum() / valid.sum().clamp(min=1)
         return ll.mean()
 
 

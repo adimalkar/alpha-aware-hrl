@@ -1,0 +1,44 @@
+{
+  "provenance": {
+    "utc": "2026-09-11T06:54:55+00:00",
+    "git_commit": "50e153d61f8df082f424f79319986fdbf799dca0",
+    "git_dirty": true,
+    "python": "3.14.6",
+    "platform": "Linux-7.2.3-arch1-3-x86_64-with-glibc2.44",
+    "torch": "2.14.0+cu130",
+    "cuda": true
+  },
+  "device": "cuda",
+  "results": [
+    {
+      "extractor": "LEMFeaturesExtractor",
+      "params": 514172,
+      "batch_size": 1,
+      "latency_ms_mean": 1.408,
+      "latency_ms_p50": 1.3935,
+      "latency_ms_p95": 1.475,
+      "latency_ms_std": 0.0527,
+      "per_sample_ms": 1.40797
+    },
+    {
+      "extractor": "GRUWindowExtractor",
+      "params": 204544,
+      "batch_size": 1,
+      "latency_ms_mean": 0.1626,
+      "latency_ms_p50": 0.1613,
+      "latency_ms_p95": 0.1697,
+      "latency_ms_std": 0.0036,
+      "per_sample_ms": 0.16259
+    },
+    {
+      "extractor": "MLPWindowExtractor",
+      "params": 1213056,
+      "batch_size": 1,
+      "latency_ms_mean": 0.0642,
+      "latency_ms_p50": 0.0635,
+      "latency_ms_p95": 0.0683,
+      "latency_ms_std": 0.0023,
+      "per_sample_ms": 0.06424
+    }
+  ]
+}

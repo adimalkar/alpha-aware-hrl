@@ -3,22 +3,32 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Data and Models
-data/
-experiments/
-*.npy
-*.csv
-*.pt
-*.pth
-
 # Environments
 .env
-.venv
+.venv/
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Raw datasets (large; rebuild via scripts/download_real_data.py)
+data/
+
+# Model weights and caches
+*.pt
+*.pth
+*.zip
+.pytest_cache/
+
+# Experiment artefacts: exclude weights and tensorboard, but TRACK results
+# metadata so every number has a provenance chain. Note: git cannot re-include
+# a file whose parent directory is excluded, so we exclude contents, not dirs.
+experiments/**/tensorboard/
+experiments/**/logs/
+experiments/**/*.zip
+experiments/**/*.npy
+experiments/**/*.png
 
 # IDEs
 .idea/
@@ -34,3 +44,6 @@ venv.bak/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Dataset manifest is small provenance metadata - track it
+!data/live_market/manifest.json

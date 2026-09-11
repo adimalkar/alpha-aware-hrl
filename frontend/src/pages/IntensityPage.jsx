@@ -9,6 +9,7 @@ export default function IntensityPage() {
   const [intensityData, setIntensityData] = useState([]);
   const [currentCrashRate, setCurrentCrashRate] = useState(0.04);
   const [burstAlert, setBurstAlert] = useState(false);
+  const [offline, setOffline] = useState(false);
 
   useEffect(() => {
     let t = 0;
@@ -22,6 +23,7 @@ export default function IntensityPage() {
           const lSafe = data.lambda_safe || 1.2;
           const lRisky = data.lambda_risky || 0.3;
 
+          setOffline(false);
           setCurrentCrashRate(lCrash);
           setBurstAlert(lCrash > 1.0);
 
@@ -36,24 +38,12 @@ export default function IntensityPage() {
           ]);
         }
       } catch (err) {
-        // Offline fallback
-        const isSpike = t % 15 === 0;
-        const lCrash = isSpike ? 2.1 + Math.random() * 0.5 : 0.05 + Math.random() * 0.08;
-        const lSafe = isSpike ? 0.3 : 1.4 + Math.random() * 0.3;
-        const lRisky = isSpike ? 1.6 : 0.25 + Math.random() * 0.1;
-
-        setCurrentCrashRate(lCrash);
-        setBurstAlert(isSpike);
-
-        setIntensityData(prev => [
-          ...prev.slice(-39),
-          {
-            step: `${t}`,
-            crash: parseFloat(lCrash.toFixed(3)),
-            safe: parseFloat(lSafe.toFixed(3)),
-            risky: parseFloat(lRisky.toFixed(3)),
-          }
-        ]);
+        // No simulated fallback. This block previously synthesised Hawkes
+        // intensities and burst alerts with Math.random() whenever the API was
+        // unreachable, so a dead backend rendered as live telemetry -- complete
+        // with fake crash-intensity spikes every 15 ticks.
+        setOffline(true);
+        setBurstAlert(false);
       }
     }, 1000);
 

@@ -25,7 +25,7 @@ import json
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, '.')
-from src.utils.data_loader import FI2010DataLoader
+from src.utils.data_loader import FI2010DataLoader, LiveMarketDataLoader
 from src.envs.historical_lob_env import HistoricalLOBEnv
 from src.utils.metrics import (
     compute_sharpe, 
@@ -201,14 +201,18 @@ def evaluate_strategy(name, strategy_obj, env_kwargs, n_steps=31900):
     cvar = compute_cvar(returns)
     final_port = portfolio_history[-1]
     
+    # compute_max_drawdown already returns percent (see metrics unit contract);
+    # multiplying again here is what produced the 6619% drawdown in the
+    # committed baseline_metrics.json.
     return {
         "Name": name,
         "Final Portfolio": final_port,
         "Return %": ((final_port - 100000) / 100000) * 100,
         "Sharpe Ratio": sharpe,
-        "Max Drawdown %": mdd * 100,
-        "VaR (95%)": var * 100,
-        "CVaR (95%)": cvar * 100,
+        "Sharpe Annualised": False,
+        "Max Drawdown %": mdd,
+        "VaR (95%) %": var * 100,
+        "CVaR (95%) %": cvar * 100,
         "_history": portfolio_history
     }
 
@@ -218,17 +222,35 @@ def main():
     print("=" * 60)
     
     # 1. Load Data
-    print("\nLoading FI-2010 Data...")
-    loader = FI2010DataLoader(data_dir="data/fi2010/FI2010", horizon_idx=0)
+    #
+    # Baselines must run on the SAME data and the SAME price path as the agent,
+    # otherwise the comparison tables are not comparable (audit S5/M5). FI-2010
+    # cannot supply a causal price at all, so these now run on collected market
+    # data exactly as scripts/train_rl_agent.py does.
+    import argparse
+    ap = argparse.ArgumentParser(description="Traditional strategy baselines")
+    ap.add_argument("--data-dir", default="data/live_market")
+    ap.add_argument("--symbol", default="BTC/USD")
+    ap.add_argument("--fee", type=float, default=0.0005)
+    ap.add_argument("--save-dir", default="experiments/baselines")
+    cli = ap.parse_args()
+
+    print(f"\nLoading collected market data: {cli.symbol} from {cli.data_dir}")
+    loader = LiveMarketDataLoader(cli.data_dir, cli.symbol)
     loader.load("train")
     loader.load("test")
-    
+    test_prices = loader.prices("test")
+    print(f"  test rows {len(loader.test_data)}, mid "
+          f"{test_prices.min():.2f}-{test_prices.max():.2f}")
+
     env_kwargs = {
         "data_loader": loader,
         "split": "test",
-        "episode_length": 31900,  # Entire test set
+        "episode_length": len(loader.test_data) - 1,
         "starting_cash": 100000.0,
-        "transaction_fee": 0.0001, # 1 bps
+        "transaction_fee": cli.fee,
+        "prices": test_prices,
+        "reward": "log_return",
     }
     
     # 2. Initialize Strategies
@@ -256,7 +278,7 @@ def main():
     df = pd.DataFrame(results)
     print(df.to_string(index=False))
     
-    save_dir = Path("experiments/baselines")
+    save_dir = Path(cli.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
     
     df.to_json(save_dir / "baseline_metrics.json", orient="records", indent=4)

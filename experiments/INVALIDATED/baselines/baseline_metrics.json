@@ -1,0 +1,29 @@
+[
+    {
+        "Name":"MACD (Momentum)",
+        "Final Portfolio":127624.7460213927,
+        "Return %":27.6247460214,
+        "Sharpe Ratio":-1.9748557499,
+        "Max Drawdown %":986.7690994142,
+        "VaR (95%)":0.100019978,
+        "CVaR (95%)":0.1047037076
+    },
+    {
+        "Name":"Bollinger Bands (Mean Reversion)",
+        "Final Portfolio":33800.411313945,
+        "Return %":-66.1995886861,
+        "Sharpe Ratio":-4.3331301679,
+        "Max Drawdown %":6619.9588686055,
+        "VaR (95%)":0.1,
+        "CVaR (95%)":0.1031747199
+    },
+    {
+        "Name":"Supervised LSTM",
+        "Final Portfolio":80172.2664125473,
+        "Return %":-19.8277335875,
+        "Sharpe Ratio":-5.5428315322,
+        "Max Drawdown %":2180.6977800404,
+        "VaR (95%)":0.0100010001,
+        "CVaR (95%)":0.0642973043
+    }
+]

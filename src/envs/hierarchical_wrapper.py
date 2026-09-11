@@ -42,6 +42,17 @@ class HierarchicalEnvWrapper(gym.ObservationWrapper):
         seq_len: int = 50,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
     ):
+        import warnings
+        warnings.warn(
+            "HierarchicalEnvWrapper runs the feature extractor inside the "
+            "environment under torch.no_grad(), so the extractor can never "
+            "receive a gradient from the RL loss and is not saved with the "
+            "policy (audit finding D1). Use SequenceWindowWrapper together with "
+            "src.agents.lem_extractor.LEMFeaturesExtractor, which places the "
+            "encoder in the policy where autograd reaches it.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__(env)
         self.mamba_extractor = mamba_extractor
         self.llm_analyst = llm_analyst

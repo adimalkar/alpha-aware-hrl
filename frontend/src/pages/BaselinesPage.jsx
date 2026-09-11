@@ -1,9 +1,9 @@
-import { mockBaselines, mockAblations } from '../utils/mockData';
 import {
-  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
-  ResponsiveContainer, Tooltip,
   BarChart, Bar, XAxis, YAxis, Cell, CartesianGrid,
+  ResponsiveContainer, Tooltip,
 } from 'recharts';
+import { useApiData } from '../utils/api';
+import NoData from '../components/NoData';
 
 const tooltipStyle = {
   background: '#161b22',
@@ -15,107 +15,143 @@ const tooltipStyle = {
 
 const ABLATION_COLORS = ['#58a6ff', '#bc8cff', '#f85149', '#39d2c0', '#d29922'];
 
+const RUN_ABLATION =
+  'python scripts/run_ablations.py --symbol BTC/USD \\\n' +
+  '    --arms lem lem_frozen gru mlp --seeds 0 1 2';
+
+function num(v, digits = 4) {
+  return typeof v === 'number' && Number.isFinite(v) ? v.toFixed(digits) : '—';
+}
+
 export default function BaselinesPage() {
-  // Normalize metrics for radar chart (0-100 scale)
-  const radarData = [
-    { metric: 'Sharpe', ...Object.fromEntries(mockBaselines.map(b => [b.name, Math.max(0, (b.sharpe + 6) * 12)])) },
-    { metric: 'Return', ...Object.fromEntries(mockBaselines.map(b => [b.name, Math.max(0, (b.returnPct + 70) * 0.6)])) },
-    { metric: 'Win Rate', ...Object.fromEntries(mockBaselines.map(b => [b.name, 30 + Math.random() * 40])) },
-    { metric: 'Low Drawdown', ...Object.fromEntries(mockBaselines.map(b => [b.name, Math.max(0, 100 - b.maxDrawdown * 0.01)])) },
-    { metric: 'Low VaR', ...Object.fromEntries(mockBaselines.map(b => [b.name, Math.max(0, 100 - b.var95 * 500)])) },
-  ];
+  const { data, loading, error, noData, howToGenerate } = useApiData('/api/baselines');
+
+  if (loading) {
+    return (
+      <div>
+        <div className="page-header"><h1>Baseline Comparisons</h1></div>
+        <NoData title="Loading…" detail="Fetching measured results from the API." />
+      </div>
+    );
+  }
+
+  if (error || noData) {
+    return (
+      <div>
+        <div className="page-header">
+          <h1>Baseline Comparisons</h1>
+          <p>Agent vs. traditional strategies and feature-extractor ablations</p>
+        </div>
+        <NoData
+          error={error}
+          title="No comparative results yet"
+          detail="No ablation or baseline run exists in this workspace. Previous results were withdrawn to experiments/INVALIDATED/ because they were produced on a leaking harness."
+          command={howToGenerate ?? RUN_ABLATION}
+        />
+      </div>
+    );
+  }
+
+  const ablations = data.ablations ?? [];
+  const strategies = data.strategies ?? [];
 
   return (
     <div>
       <div className="page-header">
         <h1>Baseline Comparisons</h1>
-        <p>Side-by-side comparison of HRL agent vs. traditional financial strategies and ablations</p>
+        <p>Agent vs. traditional strategies and feature-extractor ablations</p>
       </div>
 
-      {/* Comparison Table */}
-      <div className="glass-card" style={{ marginBottom: 18 }}>
-        <div className="card-header">
-          <span className="card-title">Strategy Performance Table</span>
-        </div>
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Strategy</th>
-              <th>Final Portfolio</th>
-              <th>Return %</th>
-              <th>Sharpe Ratio</th>
-              <th>Max Drawdown %</th>
-              <th>VaR (95%)</th>
-              <th>CVaR (95%)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {mockBaselines.map((b, i) => (
-              <tr key={b.name} style={i === 0 ? { background: 'var(--accent-blue-glow)' } : {}}>
-                <td style={{ fontWeight: i === 0 ? 700 : 400, color: i === 0 ? 'var(--accent-blue)' : 'var(--text-secondary)' }}>
-                  {b.name}
-                </td>
-                <td className="mono">${b.finalPortfolio.toLocaleString()}</td>
-                <td>
-                  <span style={{ color: b.returnPct >= 0 ? 'var(--color-profit)' : 'var(--color-loss)', fontWeight: 600 }}>
-                    {b.returnPct >= 0 ? '+' : ''}{b.returnPct.toFixed(2)}%
-                  </span>
-                </td>
-                <td className="mono" style={{ color: b.sharpe >= 0 ? 'var(--color-profit)' : 'var(--color-loss)' }}>
-                  {b.sharpe.toFixed(2)}
-                </td>
-                <td className="mono" style={{ color: 'var(--color-loss)' }}>{b.maxDrawdown.toFixed(1)}%</td>
-                <td className="mono">{(b.var95 * 100).toFixed(2)}%</td>
-                <td className="mono">{(b.cvar95 * 100).toFixed(2)}%</td>
+      {ablations.length > 0 && (
+        <div className="glass-card" style={{ marginBottom: 18 }}>
+          <div className="card-header">
+            <span className="card-title">
+              Ablation arms — mean over seeds, 95% CI
+            </span>
+          </div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Arm</th>
+                <th>Seeds</th>
+                <th>Return % (mean)</th>
+                <th>± CI95</th>
+                <th>Sharpe / step</th>
+                <th>Traded</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {ablations.map((a) => (
+                <tr key={a.arm}>
+                  <td style={{ fontWeight: 600 }}>{a.arm}</td>
+                  <td>{a.n_seeds}</td>
+                  <td>{num(a.return_pct_mean)}</td>
+                  <td>{num(a.return_pct_ci95)}</td>
+                  <td>{num(a.sharpe_mean)}</td>
+                  <td>{a.arms_that_traded}/{a.n_seeds}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p style={{ fontSize: 11.5, color: '#6e7681', marginTop: 10, lineHeight: 1.6 }}>
+            <code>lem_frozen</code> reproduces the original configuration in which the
+            encoder received no gradient. It is a control, not a competitor.
+            Sharpe is per-step and deliberately not annualised — annualising
+            tick returns by √N is how the withdrawn Sharpe of 365 was produced.
+          </p>
+        </div>
+      )}
 
-      <div className="chart-grid">
-        {/* Radar Chart */}
+      {ablations.length > 0 && (
+        <div className="glass-card" style={{ marginBottom: 18 }}>
+          <div className="card-header">
+            <span className="card-title">Mean return by arm (%)</span>
+          </div>
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={ablations}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(240,246,252,0.06)" />
+              <XAxis dataKey="arm" tick={{ fontSize: 11, fill: '#8b949e' }} />
+              <YAxis tick={{ fontSize: 11, fill: '#8b949e' }} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Bar dataKey="return_pct_mean" radius={[6, 6, 0, 0]}>
+                {ablations.map((_, i) => (
+                  <Cell key={i} fill={ABLATION_COLORS[i % ABLATION_COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {strategies.length > 0 && (
         <div className="glass-card">
           <div className="card-header">
-            <span className="card-title">Multi-Metric Radar</span>
+            <span className="card-title">Traditional strategy baselines</span>
           </div>
-          <div className="chart-container">
-            <ResponsiveContainer width="100%" height="100%">
-              <RadarChart data={radarData}>
-                <PolarGrid stroke="rgba(48,54,61,0.6)" />
-                <PolarAngleAxis dataKey="metric" tick={{ fill: '#8b949e', fontSize: 11 }} />
-                <PolarRadiusAxis tick={false} axisLine={false} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Radar name="HRL Agent" dataKey="Alpha-Aware HRL (Ours)" stroke="#58a6ff" fill="#58a6ff" fillOpacity={0.2} strokeWidth={2} />
-                <Radar name="MACD" dataKey="MACD (Momentum)" stroke="#d29922" fill="transparent" strokeWidth={1.5} strokeDasharray="4 2" />
-                <Radar name="LSTM" dataKey="Supervised LSTM" stroke="#bc8cff" fill="transparent" strokeWidth={1.5} strokeDasharray="4 2" />
-              </RadarChart>
-            </ResponsiveContainer>
-          </div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Strategy</th>
+                <th>Final Portfolio</th>
+                <th>Return %</th>
+                <th>Sharpe</th>
+                <th>Max DD %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {strategies.map((s, i) => (
+                <tr key={i}>
+                  <td style={{ fontWeight: 600 }}>{s.Name ?? s.name}</td>
+                  <td>{num(s['Final Portfolio'], 2)}</td>
+                  <td>{num(s['Return %'], 4)}</td>
+                  <td>{num(s['Sharpe Ratio'], 4)}</td>
+                  <td>{num(s['Max Drawdown %'], 4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-
-        {/* Ablation Study */}
-        <div className="glass-card">
-          <div className="card-header">
-            <span className="card-title">Ablation Study — Sharpe Ratio</span>
-          </div>
-          <div className="chart-container">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={mockAblations} layout="vertical">
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(48,54,61,0.4)" horizontal={false} />
-                <XAxis type="number" stroke="#484f58" tickLine={false} fontSize={11} />
-                <YAxis type="category" dataKey="variant" stroke="#484f58" tickLine={false} fontSize={11} width={140} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(v) => [v.toFixed(2), 'Sharpe']} />
-                <Bar dataKey="sharpe" radius={[0, 6, 6, 0]} animationDuration={800}>
-                  {mockAblations.map((_, idx) => (
-                    <Cell key={idx} fill={ABLATION_COLORS[idx]} fillOpacity={0.75} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

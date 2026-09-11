@@ -43,6 +43,7 @@ export default function EventStreamPage() {
   });
 
   const [recentEvents, setRecentEvents] = useState([]);
+  const [offline, setOffline] = useState(false);
   const [rateHistory, setRateHistory] = useState([]);
 
   useEffect(() => {
@@ -66,32 +67,10 @@ export default function EventStreamPage() {
           setRecentEvents(recData.events.slice(-15).reverse());
         }
       } catch (err) {
-        // Fallback simulation when API is in offline mode
-        tickCount++;
-        const simulatedRate = 22 + Math.sin(tickCount / 5) * 8 + Math.random() * 4;
-        setLiveTelemetry(prev => ({
-          ...prev,
-          event_rate: Math.round(simulatedRate * 10) / 10,
-          lambda_safe: 1.2 + Math.random() * 0.3,
-          lambda_crash: 0.04 + (tickCount % 20 === 0 ? 0.8 : 0.01),
-        }));
-
-        setRateHistory(prev => [
-          ...prev.slice(-29),
-          { time: new Date().toLocaleTimeString().slice(3, 8), rate: Math.round(simulatedRate) }
-        ]);
-
-        const sampleTypes = ['mid_price_up', 'mid_price_down', 'bid_volume_surge', 'spread_widen', 'volatility_spike'];
-        const chosen = sampleTypes[Math.floor(Math.random() * sampleTypes.length)];
-        setRecentEvents(prev => [
-          {
-            index: Date.now(),
-            type_name: chosen,
-            dt: (0.005 + Math.random() * 0.03).toFixed(4),
-            timestamp: (Date.now() / 1000).toFixed(2),
-          },
-          ...prev.slice(0, 14),
-        ]);
+        // No simulated fallback. This block previously invented an event rate,
+        // Hawkes intensities and a stream of random event types whenever the
+        // API was unreachable, which is indistinguishable from a live feed.
+        setOffline(true);
       }
     }, 1000);
 

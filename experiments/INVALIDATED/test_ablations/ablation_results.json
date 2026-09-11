@@ -1,0 +1,54 @@
+[
+  {
+    "config": "tcn_ppo",
+    "seed": 42,
+    "timesteps": 500,
+    "train_time_s": 1.6,
+    "mean_reward": 0.007195,
+    "std_reward": 0.021584,
+    "min_reward": 0.0,
+    "max_reward": 0.071946,
+    "mean_portfolio": 100719.46,
+    "obs_dim": 132,
+    "rl_algo": "PPO"
+  },
+  {
+    "config": "lstm_ppo",
+    "seed": 42,
+    "timesteps": 500,
+    "train_time_s": 1.6,
+    "mean_reward": 0.0,
+    "std_reward": 0.0,
+    "min_reward": 0.0,
+    "max_reward": 0.0,
+    "mean_portfolio": 100000.0,
+    "obs_dim": 132,
+    "rl_algo": "PPO"
+  },
+  {
+    "config": "lstm_dsac",
+    "seed": 42,
+    "timesteps": 500,
+    "train_time_s": 6.3,
+    "mean_reward": 0.0,
+    "std_reward": 0.0,
+    "min_reward": 0.0,
+    "max_reward": 0.0,
+    "mean_portfolio": 100000.0,
+    "obs_dim": 132,
+    "rl_algo": "TQC"
+  },
+  {
+    "config": "full",
+    "seed": 42,
+    "timesteps": 500,
+    "train_time_s": 7.0,
+    "mean_reward": 0.0,
+    "std_reward": 0.0,
+    "min_reward": 0.0,
+    "max_reward": 0.0,
+    "mean_portfolio": 100000.0,
+    "obs_dim": 136,
+    "rl_algo": "TQC"
+  }
+]

@@ -4,6 +4,8 @@ Real-time Streaming Inference Engine for Alpha-Aware HRL.
 
 import time
 import threading
+import warnings
+from pathlib import Path
 from typing import Dict, Any, Optional
 import numpy as np
 import torch
@@ -26,12 +28,39 @@ class StreamingInferenceEngine:
         regime_analyst: Optional[EventAwareRegimeAnalyst] = None,
         poll_interval_sec: float = 0.05,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        encoder_checkpoint: Optional[str] = "checkpoints/event_encoder_thp.pt",
     ):
         self.buffer = event_buffer
         self.device = device
         self.poll_interval = poll_interval_sec
 
-        self.feature_extractor = feature_extractor or EventFeatureExtractor(input_dim=144, d_model=128).to(device)
+        # Load pretrained encoder weights if available. Serving a randomly
+        # initialised encoder is the same defect as D1, just in the inference
+        # path: the telemetry looks live but the representation is noise.
+        self.encoder_is_pretrained = False
+        if feature_extractor is None:
+            feature_extractor = EventFeatureExtractor(input_dim=144, d_model=128)
+            ckpt_path = Path(encoder_checkpoint) if encoder_checkpoint else None
+            if ckpt_path and ckpt_path.is_file():
+                ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+                try:
+                    feature_extractor.encoder.load_state_dict(ckpt["state_dict"])
+                    self.encoder_is_pretrained = True
+                except (KeyError, RuntimeError) as exc:
+                    warnings.warn(
+                        f"Could not load encoder weights from {ckpt_path}: {exc}. "
+                        "Serving a randomly initialised encoder.",
+                        RuntimeWarning, stacklevel=2,
+                    )
+            else:
+                warnings.warn(
+                    f"No encoder checkpoint at {encoder_checkpoint}; the streaming "
+                    "engine is serving a RANDOMLY INITIALISED encoder. Run "
+                    "scripts/pretrain_event_encoder.py first. Telemetry from this "
+                    "engine does not reflect a trained model.",
+                    RuntimeWarning, stacklevel=2,
+                )
+        self.feature_extractor = feature_extractor.to(device)
         self.regime_analyst = regime_analyst or EventAwareRegimeAnalyst(device=device)
 
         self._running = False
@@ -49,7 +78,11 @@ class StreamingInferenceEngine:
             "action_label": "Hold",
             "pnl": 100000.0,
             "pnl_pct": 0.0,
-            "sharpe": 1.87,
+            # No hardcoded Sharpe. The previous value (1.87) was a literal that
+            # surfaced through /api/metrics as if it were measured. A live
+            # Sharpe needs a return history this engine does not accumulate.
+            "sharpe": None,
+            "encoder_is_pretrained": self.encoder_is_pretrained,
             "lambda_safe": 1.2,
             "lambda_risky": 0.2,
             "lambda_crash": 0.02,

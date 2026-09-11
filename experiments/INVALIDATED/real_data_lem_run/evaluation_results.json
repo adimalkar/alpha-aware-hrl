@@ -1,0 +1,13 @@
+{
+  "model_type": "Alpha-Aware HRL (EVENT)",
+  "timesteps": 25000,
+  "starting_capital": 100000.0,
+  "final_portfolio": 49971.88,
+  "total_return_pct": -50.03,
+  "sharpe_ratio": -7.26,
+  "max_drawdown_pct": 6.8,
+  "win_rate_pct": 16.8,
+  "var_95": 0.0016,
+  "cvar_95": 0.0018,
+  "eval_steps": 5000
+}

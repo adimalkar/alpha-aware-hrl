@@ -1,0 +1,154 @@
+[
+  {
+    "config": "tcn_ppo",
+    "n_seeds": 2,
+    "mean_reward": 0.003598,
+    "std_reward": 0.003598,
+    "ci_95_reward": 0.004986,
+    "mean_portfolio": 100359.73,
+    "std_portfolio": 359.73,
+    "mean_train_time_s": 2.3,
+    "per_seed_results": [
+      {
+        "config": "tcn_ppo",
+        "seed": 42,
+        "timesteps": 500,
+        "train_time_s": 3.3,
+        "mean_reward": 0.007195,
+        "std_reward": 0.021584,
+        "min_reward": 0.0,
+        "max_reward": 0.071946,
+        "mean_portfolio": 100719.46,
+        "obs_dim": 132,
+        "rl_algo": "PPO"
+      },
+      {
+        "config": "tcn_ppo",
+        "seed": 1,
+        "timesteps": 500,
+        "train_time_s": 1.3,
+        "mean_reward": 0.0,
+        "std_reward": 0.0,
+        "min_reward": 0.0,
+        "max_reward": 0.0,
+        "mean_portfolio": 100000.0,
+        "obs_dim": 132,
+        "rl_algo": "PPO"
+      }
+    ]
+  },
+  {
+    "config": "lstm_ppo",
+    "n_seeds": 2,
+    "mean_reward": 0.0,
+    "std_reward": 0.0,
+    "ci_95_reward": 0.0,
+    "mean_portfolio": 100000.0,
+    "std_portfolio": 0.0,
+    "mean_train_time_s": 0.9,
+    "per_seed_results": [
+      {
+        "config": "lstm_ppo",
+        "seed": 42,
+        "timesteps": 500,
+        "train_time_s": 0.8,
+        "mean_reward": 0.0,
+        "std_reward": 0.0,
+        "min_reward": 0.0,
+        "max_reward": 0.0,
+        "mean_portfolio": 100000.0,
+        "obs_dim": 132,
+        "rl_algo": "PPO"
+      },
+      {
+        "config": "lstm_ppo",
+        "seed": 1,
+        "timesteps": 500,
+        "train_time_s": 1.0,
+        "mean_reward": 0.0,
+        "std_reward": 0.0,
+        "min_reward": 0.0,
+        "max_reward": 0.0,
+        "mean_portfolio": 100000.0,
+        "obs_dim": 132,
+        "rl_algo": "PPO"
+      }
+    ]
+  },
+  {
+    "config": "lstm_dsac",
+    "n_seeds": 2,
+    "mean_reward": 0.0,
+    "std_reward": 0.0,
+    "ci_95_reward": 0.0,
+    "mean_portfolio": 100000.0,
+    "std_portfolio": 0.0,
+    "mean_train_time_s": 168.8,
+    "per_seed_results": [
+      {
+        "config": "lstm_dsac",
+        "seed": 42,
+        "timesteps": 500,
+        "train_time_s": 166.9,
+        "mean_reward": 0.0,
+        "std_reward": 0.0,
+        "min_reward": 0.0,
+        "max_reward": 0.0,
+        "mean_portfolio": 100000.0,
+        "obs_dim": 132,
+        "rl_algo": "TQC"
+      },
+      {
+        "config": "lstm_dsac",
+        "seed": 1,
+        "timesteps": 500,
+        "train_time_s": 170.7,
+        "mean_reward": 0.0,
+        "std_reward": 0.0,
+        "min_reward": 0.0,
+        "max_reward": 0.0,
+        "mean_portfolio": 100000.0,
+        "obs_dim": 132,
+        "rl_algo": "TQC"
+      }
+    ]
+  },
+  {
+    "config": "full",
+    "n_seeds": 2,
+    "mean_reward": 0.0,
+    "std_reward": 0.0,
+    "ci_95_reward": 0.0,
+    "mean_portfolio": 100000.0,
+    "std_portfolio": 0.0,
+    "mean_train_time_s": 151.8,
+    "per_seed_results": [
+      {
+        "config": "full",
+        "seed": 42,
+        "timesteps": 500,
+        "train_time_s": 251.8,
+        "mean_reward": 0.0,
+        "std_reward": 0.0,
+        "min_reward": 0.0,
+        "max_reward": 0.0,
+        "mean_portfolio": 100000.0,
+        "obs_dim": 136,
+        "rl_algo": "TQC"
+      },
+      {
+        "config": "full",
+        "seed": 1,
+        "timesteps": 500,
+        "train_time_s": 51.9,
+        "mean_reward": 0.0,
+        "std_reward": 0.0,
+        "min_reward": 0.0,
+        "max_reward": 0.0,
+        "mean_portfolio": 100000.0,
+        "obs_dim": 136,
+        "rl_algo": "TQC"
+      }
+    ]
+  }
+]

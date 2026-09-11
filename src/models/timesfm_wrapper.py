@@ -193,11 +193,20 @@ class TimesFMWrapper(nn.Module):
 class SimpleAlphaModel(nn.Module):
     """
     Simple baseline alpha model for comparison.
-    
+
     Uses LSTM to predict future price direction.
     Used when TimesFM is not available or for ablation studies.
+
+    WARNING (audit D4): nothing in this repository fits this model. The
+    hierarchical agent constructed it, called .eval(), and used its outputs
+    without ever training it, so its 4 "alpha horizons" were random
+    projections of price history. A frozen PRETRAINED foundation model is a
+    defensible design choice; a frozen RANDOMLY INITIALISED MLP is not.
+
+    Either fit it before use or leave alpha_model=None. `is_trained` is set
+    only by an explicit call to mark_trained().
     """
-    
+
     def __init__(
         self,
         input_dim: int = 1,
@@ -206,6 +215,8 @@ class SimpleAlphaModel(nn.Module):
         prediction_horizons: List[int] = [10, 20, 50, 100],
     ):
         super().__init__()
+        self.is_trained = False
+        self._warned = False
         
         self.lstm = nn.LSTM(
             input_size=input_dim,
@@ -220,6 +231,22 @@ class SimpleAlphaModel(nn.Module):
         ])
         
         self.feature_proj = nn.Linear(hidden_dim, 128)
+
+    def mark_trained(self) -> None:
+        """Record that this model has actually been fitted."""
+        self.is_trained = True
+
+    def _warn_if_untrained(self) -> None:
+        if not self.is_trained and not self._warned:
+            import warnings
+            warnings.warn(
+                "SimpleAlphaModel is being used without having been trained; its "
+                "outputs are random projections of the input. Fit it and call "
+                "mark_trained(), or pass alpha_model=None.",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+            self._warned = True
         
     def forward(
         self,
@@ -233,9 +260,11 @@ class SimpleAlphaModel(nn.Module):
             features: (batch, 128)
             predictions: (batch, n_horizons)
         """
+        self._warn_if_untrained()
+
         if price_history.dim() == 2:
             price_history = price_history.unsqueeze(-1)
-        
+
         lstm_out, (h_n, _) = self.lstm(price_history)
         
         # Last hidden state
