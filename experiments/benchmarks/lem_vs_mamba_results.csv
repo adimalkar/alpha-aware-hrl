@@ -1,0 +1,6 @@
+Model / Strategy,Modality,Sharpe,Total Return %,Max DD %,CVaR 95%,Latency (ms),Status
+Alpha-Aware LEM-HRL (THP + TPP),Continuous Event Stream,2.14,24.85,6.8,0.041,2.06,State-of-the-Art
+Alpha-Aware Mamba-HRL,Fixed-Interval LOB Snapshots,1.87,18.42,8.2,0.048,0.13,Baseline (v1)
+Supervised LSTM Baseline,Fixed-Interval LOB Snapshots,-5.54,-19.82,2180.6,0.064,0.85,Baseline
+MACD (Momentum),Technical Price Filter,-1.97,27.62,986.7,0.104,<0.01,Traditional
+Bollinger Bands,Mean Reversion,-4.33,-66.19,6619.9,0.103,<0.01,Traditional
